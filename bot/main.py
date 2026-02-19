@@ -13,6 +13,7 @@ from bot.handlers.payment import (
     paid_upi_callback, paid_crypto_callback, receive_screenshot, cancel,
     WAITING_SCREENSHOT_UPI, WAITING_SCREENSHOT_CRYPTO,
 )
+from bot.handlers.admin import admin_command
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -45,6 +46,7 @@ def build_app(token: str, bot_id: str) -> Application:
     )
 
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("admin", admin_command))
     app.add_handler(payment_conv)
     app.add_handler(CallbackQueryHandler(get_premium_callback,  pattern="^get_premium$"))
     app.add_handler(CallbackQueryHandler(pay_upi_callback,      pattern="^pay_upi$"))
