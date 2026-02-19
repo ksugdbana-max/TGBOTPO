@@ -589,18 +589,29 @@ async def cb_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_id = context.bot_data.get("bot_id", "default")
     # Pre-load user count so admin knows what they're broadcasting to
     try:
+        # 1. Users from payments (all statuses)
         res = (supabase.table("payments")
                .select("user_id")
                .eq("bot_id", bot_id)
-               .eq("status", "confirmed")
                .execute())
-        total_users = len({r["user_id"] for r in (res.data or [])})
+        pay_ids = {r["user_id"] for r in (res.data or [])}
+
+        # 2. Extra admins
+        raw = get_config("extra_admins", bot_id, "")
+        extra_ids = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+
+        # 3. Primary admin
+        primary = _admin_id()
+        if primary:
+            extra_ids.add(primary)
+
+        total_users = len(pay_ids | extra_ids)
     except Exception:
         total_users = "?"
 
     await _edit_or_send(update,
         f"📢 <b>Broadcast Message</b>\n\n"
-        f"👥 Total approved users: <b>{total_users}</b>\n\n"
+        f"👥 Total unique users (incl. admins): <b>{total_users}</b>\n\n"
         "Send the message you want to broadcast to <b>all approved users</b> of this bot.\n"
         "HTML formatting supported.\n\n"
         "Send /cancel to abort.",
@@ -612,10 +623,10 @@ async def recv_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_id = context.bot_data.get("bot_id", "default")
     text = update.message.text
     try:
+        # 1. Users from payments (all statuses)
         res = (supabase.table("payments")
                .select("user_id, username")
                .eq("bot_id", bot_id)
-               .eq("status", "confirmed")
                .execute())
         rows = res.data or []
     except Exception as e:
@@ -627,6 +638,19 @@ async def recv_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     seen = {}
     for r in rows:
         seen[r["user_id"]] = r.get("username", str(r["user_id"]))
+    
+    # Add admins if missing
+    raw = get_config("extra_admins", bot_id, "")
+    for x in raw.split(","):
+        if x.strip().isdigit():
+            uid = int(x.strip())
+            if uid not in seen:
+                seen[uid] = str(uid)
+
+    primary = _admin_id()
+    if primary and primary not in seen:
+        seen[primary] = "Primary Admin"
+
     user_ids = list(seen.keys())
     total = len(user_ids)
 
