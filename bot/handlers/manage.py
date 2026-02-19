@@ -260,18 +260,29 @@ async def cb_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     bot_id = context.bot_data.get("bot_id", "default")
     try:
+        # Get users from bot_users table (real tracking)
+        all_u = (supabase.table("bot_users")
+                 .select("user_id")
+                 .eq("bot_id", bot_id)
+                 .execute().data or [])
+        unique_users = len(all_u)
+        
+        # Get payments stats
         all_p = supabase.table("payments").select("status").eq("bot_id", bot_id).execute().data or []
-        total    = len(all_p)
+        total_p  = len(all_p)
         pending  = sum(1 for p in all_p if p["status"] == "pending")
         approved = sum(1 for p in all_p if p["status"] == "confirmed")
         rejected = sum(1 for p in all_p if p["status"] == "rejected")
     except Exception as e:
         logger.error(f"cb_stats error: {e}")
-        total = pending = approved = rejected = 0
+        unique_users = "?"
+        total_p = pending = approved = rejected = 0
+        await update.effective_chat.send_message(f"⚠️ Stats Error: {e}")
 
     await _edit_or_send(update,
         f"📊 <b>Stats — {bot_id.upper()}</b>\n\n"
-        f"💰 Total Payments: <b>{total}</b>\n"
+        f"👥 Unique Users: <b>{unique_users}</b> (clicked /start)\n"
+        f"💰 Total Payments: <b>{total_p}</b>\n"
         f"⏳ Pending:  <b>{pending}</b>\n"
         f"✅ Approved: <b>{approved}</b>\n"
         f"❌ Rejected: <b>{rejected}</b>",
@@ -284,37 +295,56 @@ async def cb_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     bot_id = context.bot_data.get("bot_id", "default")
     try:
-        res = (supabase.table("payments")
-               .select("user_id, username, payment_type, created_at")
-               .eq("bot_id", bot_id)
-               .eq("status", "confirmed")
-               .order("created_at", desc=True)
-               .execute())
-        users = res.data or []
+        # Fetch from bot_users (primary source)
+        res_u = (supabase.table("bot_users")
+                 .select("user_id, username, created_at")
+                 .eq("bot_id", bot_id)
+                 .order("created_at", desc=True)
+                 .limit(50)
+                 .execute())
+        users_u = res_u.data or []
+        
+        # Fetch from payments for completeness (legacy)
+        res_p = (supabase.table("payments")
+                 .select("user_id, username, created_at")
+                 .eq("bot_id", bot_id)
+                 .order("created_at", desc=True)
+                 .limit(50)
+                 .execute())
+        users_p = res_p.data or []
+        
+        # Combine
+        all_raw = users_u + users_p
+            
     except Exception as e:
         logger.error(f"cb_users error: {e}")
-        users = []
+        all_raw = []
 
-    if not users:
+    if not all_raw:
         await _edit_or_send(update,
-            "👥 <b>Approved Users</b>\n\n❌ No approved users yet.",
+            "👥 <b>User List</b>\n\n❌ No users found yet.",
             _back_kb())
         return MAIN_MENU
-
-    # Deduplicate by user_id (keep latest)
+    
+    # Deduplicate by user_id, keep latest
     seen = set()
     unique = []
-    for u in users:
+    # robust sort by date string
+    all_raw.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+
+    for u in all_raw:
         if u["user_id"] not in seen:
             seen.add(u["user_id"])
             unique.append(u)
 
-    lines = [f"👥 <b>Approved Users — {bot_id.upper()} ({len(unique)})</b>\n"]
-    for i, u in enumerate(unique[:50], 1):
+    lines = [f"👥 <b>Latest Users — {bot_id.upper()}</b>\n"]
+    for i, u in enumerate(unique[:30], 1):
         uname = f"@{u['username']}" if u.get("username") else str(u["user_id"])
-        ptype = u.get("payment_type", "?").upper()
         date  = str(u.get("created_at", ""))[:10]
-        lines.append(f"{i}. {uname} | {ptype} | {date}")
+        lines.append(f"{i}. {uname} | {date}")
+
+    if len(unique) >= 30:
+        lines.append(f"<i>...and {len(unique)-30} more (showing latest 30)</i>")
 
     await _edit_or_send(update, "\n".join(lines), _back_kb())
     return MAIN_MENU
