@@ -20,12 +20,24 @@ export default function ButtonsPage() {
         }).finally(() => setLoading(false));
     }, [selectedBot]);
 
+    const sanitizeUrl = (url) => {
+        if (!url || !url.trim()) return 'https://t.me/';
+        url = url.trim();
+        if (url.startsWith('@')) return `https://t.me/${url.slice(1)}`;
+        if (!url.startsWith('http://') && !url.startsWith('https://')) return `https://${url}`;
+        return url;
+    };
+
     const handleSave = async () => {
         if (!selectedBot) return;
+        const cleanDemo = sanitizeUrl(demoUrl);
+        const cleanHowTo = sanitizeUrl(howToUrl);
+        setDemoUrl(cleanDemo);
+        setHowToUrl(cleanHowTo);
         setSaving(true);
         try {
-            await updateConfig(selectedBot.bot_id, 'demo_button_url', demoUrl);
-            await updateConfig(selectedBot.bot_id, 'how_to_use_button_url', howToUrl);
+            await updateConfig(selectedBot.bot_id, 'demo_button_url', cleanDemo);
+            await updateConfig(selectedBot.bot_id, 'how_to_use_button_url', cleanHowTo);
             toast.success('Button links saved! ✅');
         } catch { toast.error('Failed to save.'); }
         finally { setSaving(false); }

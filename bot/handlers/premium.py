@@ -7,6 +7,23 @@ from bot.config import get_config
 logger = logging.getLogger(__name__)
 
 
+def sanitize_url(url: str, default: str = "https://t.me/") -> str:
+    """
+    Ensure a URL is valid for Telegram inline buttons.
+    - Empty/None  → default
+    - @username   → https://t.me/username
+    - No scheme   → https:// prepended
+    """
+    if not url or not url.strip():
+        return default
+    url = url.strip()
+    if url.startswith("@"):
+        return f"https://t.me/{url[1:]}"
+    if not url.startswith(("http://", "https://")):
+        return f"https://{url}"
+    return url
+
+
 async def _safe_delete(message):
     """Delete a message silently — never crash."""
     try:
@@ -50,8 +67,8 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_id = context.bot_data.get("bot_id", "default")
         welcome_text = get_config("welcome_text", bot_id, "👋 Welcome! Choose an option below.")
         welcome_media_url = get_config("welcome_media_url", bot_id, "")
-        demo_url = get_config("demo_button_url", bot_id, "https://t.me/")
-        how_to_url = get_config("how_to_use_button_url", bot_id, "https://t.me/")
+        demo_url = sanitize_url(get_config("demo_button_url", bot_id, ""))
+        how_to_url = sanitize_url(get_config("how_to_use_button_url", bot_id, ""))
 
         keyboard = [
             [InlineKeyboardButton("💎 Get Premium", callback_data="get_premium")],
