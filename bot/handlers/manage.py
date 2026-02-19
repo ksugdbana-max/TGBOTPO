@@ -24,16 +24,17 @@ from bot.config import get_config, set_config, supabase
 logger = logging.getLogger(__name__)
 
 
-def _admin_id() -> int:
+def _owner_ids() -> set[int]:
     try:
-        return int(os.getenv("ADMIN_TELEGRAM_ID", "0"))
+        raw = os.getenv("ADMIN_TELEGRAM_ID", "0")
+        return {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
     except Exception:
-        return 0
+        return {0}
 
 
 def is_admin(user_id: int, bot_id: str = "default") -> bool:
     """Check primary admin OR extra admins stored in Supabase."""
-    if user_id == _admin_id():
+    if user_id in _owner_ids():
         return True
     try:
         raw = get_config("extra_admins", bot_id, "")
@@ -488,7 +489,10 @@ async def cb_admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
     extra_ids = [x.strip() for x in raw.split(",") if x.strip().isdigit()] if raw else []
 
     lines = [f"👤 <b>Admin Control — {bot_id.upper()}</b>\n"]
-    lines.append(f"<b>Primary Admin:</b> <code>{_admin_id()}</code>\n")
+    lines = [f"👤 <b>Admin Control — {bot_id.upper()}</b>\n"]
+    owners = _owner_ids()
+    lines.append(f"<b>Owner(s):</b> {', '.join(map(str, owners))}\n")
+    
     if extra_ids:
         lines.append("<b>Extra Admins:</b>")
         for uid in extra_ids:
@@ -498,7 +502,7 @@ async def cb_admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Build keyboard: remove buttons for each extra admin + add button (Owner only)
     rows = []
-    is_owner = (update.effective_user.id == _admin_id())
+    is_owner = (update.effective_user.id in owners)
 
     if is_owner:
         for uid in extra_ids:
@@ -515,8 +519,8 @@ async def cb_admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    if update.effective_user.id != _admin_id():
-        await update.effective_chat.send_message("⛔ Only the Primary Admin can add other admins.")
+    if update.effective_user.id not in _owner_ids():
+        await update.effective_chat.send_message("⛔ Only Owners (Primary Admins) can add other admins.")
         return MAIN_MENU
 
     await _edit_or_send(update,
@@ -528,7 +532,7 @@ async def cb_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def recv_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != _admin_id():
+    if update.effective_user.id not in _owner_ids():
         return ConversationHandler.END
 
     bot_id = context.bot_data.get("bot_id", "default")
@@ -572,7 +576,7 @@ async def recv_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer("Removing...")
-    if update.effective_user.id != _admin_id():
+    if update.effective_user.id not in _owner_ids():
         return MAIN_MENU
 
     bot_id = context.bot_data.get("bot_id", "default")
@@ -607,10 +611,9 @@ async def cb_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         raw = get_config("extra_admins", bot_id, "")
         extra_ids = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
 
-        # 4. Primary admin
-        primary = _admin_id()
-        if primary:
-            extra_ids.add(primary)
+        # 4. Primary admins (owners)
+        owners = _owner_ids() - {0}
+        extra_ids.update(owners)
 
         # Union of all unique IDs
         all_ids = user_ids | pay_ids | extra_ids
@@ -665,9 +668,9 @@ async def recv_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if uid not in seen:
                 seen[uid] = str(uid)
 
-    primary = _admin_id()
-    if primary and primary not in seen:
-        seen[primary] = "Primary Admin"
+    for owner_id in _owner_ids():
+        if owner_id and owner_id not in seen and owner_id != 0:
+            seen[owner_id] = "Primary Admin"
 
     user_ids = list(seen.keys())
     total = len(user_ids)

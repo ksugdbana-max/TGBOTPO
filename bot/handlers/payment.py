@@ -11,11 +11,12 @@ WAITING_SCREENSHOT_UPI = 1
 WAITING_SCREENSHOT_CRYPTO = 2
 
 
-def _admin_id() -> int:
+def _owner_ids() -> set[int]:
     try:
-        return int(os.getenv("ADMIN_TELEGRAM_ID", "0"))
+        raw = os.getenv("ADMIN_TELEGRAM_ID", "0")
+        return {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
     except Exception:
-        return 0
+        return {0}
 
 
 async def paid_upi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -116,9 +117,24 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.error(f"reply_text error: {e}")
 
-    # ── Notify admin — real-time payment card with Approve/Reject ────────────
-    admin_id = _admin_id()
-    if admin_id and payment_id:
+    # ── Notify ALL admins — real-time payment card with Approve/Reject ─────────
+    # ── Notify ALL admins — real-time payment card with Approve/Reject ─────────
+    owners = _owner_ids()
+    # Gather extra admins from Supabase for this bot
+    extra_ids = []
+    try:
+        from bot.config import get_config as _get_cfg
+        raw = _get_cfg("extra_admins", bot_id, "")
+        if raw:
+            extra_ids = [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
+    except Exception:
+        pass
+
+    all_admin_ids = list(owners | set(extra_ids))
+    # Remove 0 or invalid IDs just in case
+    all_admin_ids = [aid for aid in all_admin_ids if aid > 0]
+
+    if all_admin_ids and payment_id:
         username_str = f"@{user.username}" if user.username else str(user.id)
         caption = (
             f"💰 <b>PAYMENT REQUEST</b>\n\n"
@@ -132,25 +148,26 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("✅ APPROVE", callback_data=f"mgr_approve_{payment_id}"),
             InlineKeyboardButton("❌ REJECT",  callback_data=f"mgr_reject_{payment_id}"),
         ]])
-        try:
-            await context.bot.send_photo(
-                chat_id=admin_id,
-                photo=file_id,
-                caption=caption,
-                reply_markup=kb,
-                parse_mode="HTML",
-            )
-        except Exception as e:
-            logger.warning(f"[{bot_id}] Admin photo notify failed: {e} — trying text")
+        for aid in all_admin_ids:
             try:
-                await context.bot.send_message(
-                    chat_id=admin_id,
-                    text=caption,
+                await context.bot.send_photo(
+                    chat_id=aid,
+                    photo=file_id,
+                    caption=caption,
                     reply_markup=kb,
                     parse_mode="HTML",
                 )
-            except Exception as e2:
-                logger.error(f"[{bot_id}] Admin notify completely failed: {e2}")
+            except Exception as e:
+                logger.warning(f"[{bot_id}] Photo notify to {aid} failed: {e} — trying text")
+                try:
+                    await context.bot.send_message(
+                        chat_id=aid,
+                        text=caption,
+                        reply_markup=kb,
+                        parse_mode="HTML",
+                    )
+                except Exception as e2:
+                    logger.error(f"[{bot_id}] Notify to admin {aid} completely failed: {e2}")
 
     context.user_data.clear()
     return ConversationHandler.END
