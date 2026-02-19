@@ -541,8 +541,21 @@ async def cb_remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── Section: Broadcast ───────────────────────────────────────────────────────
 async def cb_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
+    bot_id = context.bot_data.get("bot_id", "default")
+    # Pre-load user count so admin knows what they're broadcasting to
+    try:
+        res = (supabase.table("payments")
+               .select("user_id")
+               .eq("bot_id", bot_id)
+               .eq("status", "confirmed")
+               .execute())
+        total_users = len({r["user_id"] for r in (res.data or [])})
+    except Exception:
+        total_users = "?"
+
     await _edit_or_send(update,
-        "📢 <b>Broadcast Message</b>\n\n"
+        f"📢 <b>Broadcast Message</b>\n\n"
+        f"👥 Total approved users: <b>{total_users}</b>\n\n"
         "Send the message you want to broadcast to <b>all approved users</b> of this bot.\n"
         "HTML formatting supported.\n\n"
         "Send /cancel to abort.",
@@ -555,37 +568,85 @@ async def recv_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     try:
         res = (supabase.table("payments")
-               .select("user_id")
+               .select("user_id, username")
                .eq("bot_id", bot_id)
                .eq("status", "confirmed")
                .execute())
         rows = res.data or []
     except Exception as e:
         logger.error(f"broadcast fetch error: {e}")
-        await update.message.reply_text("❌ Failed to fetch users.")
+        await update.message.reply_text("❌ Failed to fetch users. Please try again.")
         return ConversationHandler.END
 
-    # Unique user IDs
-    user_ids = list({r["user_id"] for r in rows})
-    sent = failed = 0
+    # Deduplicate by user_id
+    seen = {}
+    for r in rows:
+        seen[r["user_id"]] = r.get("username", str(r["user_id"]))
+    user_ids = list(seen.keys())
+    total = len(user_ids)
+
+    if total == 0:
+        await update.message.reply_text("❌ No approved users to broadcast to.")
+        return await _confirm(update, context, "Broadcast cancelled — no users.")
+
+    # Show live progress status
     status_msg = await update.message.reply_text(
-        f"📢 Broadcasting to {len(user_ids)} users...", parse_mode="HTML"
+        f"📢 <b>Broadcast Starting...</b>\n\n"
+        f"👥 Total users: <b>{total}</b>\n"
+        f"⏳ Sending messages...",
+        parse_mode="HTML"
     )
-    for uid in user_ids:
+
+    sent = failed = blocked = 0
+    failed_users = []
+
+    for i, uid in enumerate(user_ids, 1):
         try:
             await context.bot.send_message(chat_id=uid, text=text, parse_mode="HTML")
             sent += 1
-        except Exception:
-            failed += 1
+        except Exception as e:
+            err_str = str(e).lower()
+            if "blocked" in err_str or "deactivated" in err_str or "not found" in err_str:
+                blocked += 1
+            else:
+                failed += 1
+            failed_users.append(f"@{seen.get(uid, uid)}")
+
+        # Update progress every 5 users
+        if i % 5 == 0 or i == total:
+            try:
+                await status_msg.edit_text(
+                    f"📢 <b>Broadcasting...</b>\n\n"
+                    f"👥 Total: <b>{total}</b>\n"
+                    f"✅ Sent: <b>{sent}</b>\n"
+                    f"⏳ Remaining: <b>{total - i}</b>",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    # Final completion report
+    failed_note = ""
+    if failed_users:
+        sample = ", ".join(failed_users[:5])
+        if len(failed_users) > 5:
+            sample += f" +{len(failed_users) - 5} more"
+        failed_note = f"\n\n<b>Failed users:</b> {sample}"
 
     try:
         await status_msg.edit_text(
-            f"📢 <b>Broadcast Complete!</b>\n\n✅ Sent: {sent}\n❌ Failed: {failed}",
+            f"📢 <b>Broadcast Completed Successfully! 🎉</b>\n\n"
+            f"👥 Total users: <b>{total}</b>\n"
+            f"✅ Delivered: <b>{sent}</b>\n"
+            f"🚫 Blocked/Inactive: <b>{blocked}</b>\n"
+            f"❌ Other failures: <b>{failed}</b>"
+            f"{failed_note}",
             parse_mode="HTML"
         )
     except Exception:
         pass
-    return await _confirm(update, context, f"Broadcast done — {sent} sent, {failed} failed.")
+
+    return await _confirm(update, context, f"Broadcast done! ✅ {sent}/{total} delivered.")
 
 
 # ─── Section: Confirmed Message ───────────────────────────────────────────────
