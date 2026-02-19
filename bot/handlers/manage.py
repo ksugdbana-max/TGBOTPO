@@ -496,11 +496,17 @@ async def cb_admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines.append("<b>Extra Admins:</b> None")
 
-    # Build keyboard: remove buttons for each extra admin + add button
+    # Build keyboard: remove buttons for each extra admin + add button (Owner only)
     rows = []
-    for uid in extra_ids:
-        rows.append([InlineKeyboardButton(f"➖ Remove {uid}", callback_data=f"mgr_rmadmin_{uid}")])
-    rows.append([InlineKeyboardButton("➕ Add Admin", callback_data="mgr_add_admin")])
+    is_owner = (update.effective_user.id == _admin_id())
+
+    if is_owner:
+        for uid in extra_ids:
+            rows.append([InlineKeyboardButton(f"➖ Remove {uid}", callback_data=f"mgr_rmadmin_{uid}")])
+        rows.append([InlineKeyboardButton("➕ Add Admin", callback_data="mgr_add_admin")])
+    else:
+        lines.append("\n<i>(Only the Primary Admin can manage other admins)</i>")
+
     rows.append([InlineKeyboardButton("⬅️ Back", callback_data="mgr_main")])
 
     await _edit_or_send(update, "\n".join(lines), InlineKeyboardMarkup(rows))
@@ -509,6 +515,10 @@ async def cb_admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
+    if update.effective_user.id != _admin_id():
+        await update.effective_chat.send_message("⛔ Only the Primary Admin can add other admins.")
+        return MAIN_MENU
+
     await _edit_or_send(update,
         "➕ <b>Add Admin</b>\n\n"
         "Send the <b>@username</b> (must have used this bot) or the numeric <b>User ID</b> of the person to promote.\n\n"
@@ -518,6 +528,9 @@ async def cb_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def recv_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != _admin_id():
+        return ConversationHandler.END
+
     bot_id = context.bot_data.get("bot_id", "default")
     text = update.message.text.strip().lstrip("@")
     new_id = None
@@ -559,6 +572,9 @@ async def recv_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer("Removing...")
+    if update.effective_user.id != _admin_id():
+        return MAIN_MENU
+
     bot_id = context.bot_data.get("bot_id", "default")
     rm_id = update.callback_query.data.replace("mgr_rmadmin_", "").strip()
     raw = get_config("extra_admins", bot_id, "")
