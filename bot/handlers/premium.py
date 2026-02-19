@@ -1,40 +1,75 @@
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import TelegramError, BadRequest
 from telegram.ext import ContextTypes
-from bot.config import get_config, supabase
+from bot.config import get_config
+
+logger = logging.getLogger(__name__)
 
 
-async def delete_previous(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def _safe_delete(message):
+    """Delete a message silently — never crash."""
     try:
-        await update.callback_query.message.delete()
+        await message.delete()
     except Exception:
         pass
 
 
-async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    bot_id = context.bot_data.get("bot_id", "default")
-    welcome_text = get_config("welcome_text", bot_id, "👋 Welcome! Choose an option below.")
-    welcome_media_url = get_config("welcome_media_url", bot_id, "")
-    demo_url = get_config("demo_button_url", bot_id, "https://t.me/")
-    how_to_url = get_config("how_to_use_button_url", bot_id, "https://t.me/")
+async def _send_with_photo_fallback(context, chat_id, photo_url, text, reply_markup):
+    """
+    Try send_photo first. If URL is bad/empty, fall back to send_message.
+    Never crashes regardless of what the admin sets.
+    """
+    if photo_url and photo_url.strip():
+        try:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=photo_url.strip(),
+                caption=text or "‼️ No message configured.",
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+            )
+            return
+        except (TelegramError, BadRequest, Exception) as e:
+            logger.warning(f"send_photo failed (url={photo_url!r}): {e} — falling back to text")
 
-    keyboard = [
-        [InlineKeyboardButton("💎 Get Premium", callback_data="get_premium")],
-        [InlineKeyboardButton("🎥 Premium Demo ↗", url=demo_url)],
-        [InlineKeyboardButton("✅ How To Get Premium? ↗", url=how_to_url)],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    chat_id = update.effective_chat.id
-
-    if welcome_media_url:
-        await context.bot.send_photo(
-            chat_id=chat_id, photo=welcome_media_url,
-            caption=welcome_text, reply_markup=reply_markup, parse_mode="HTML",
-        )
-    else:
+    # Fallback: send text only
+    try:
         await context.bot.send_message(
-            chat_id=chat_id, text=welcome_text,
-            reply_markup=reply_markup, parse_mode="HTML",
+            chat_id=chat_id,
+            text=text or "‼️ No message configured.",
+            reply_markup=reply_markup,
+            parse_mode="HTML",
         )
+    except Exception as e:
+        logger.error(f"send_message also failed: {e}")
+
+
+async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        bot_id = context.bot_data.get("bot_id", "default")
+        welcome_text = get_config("welcome_text", bot_id, "👋 Welcome! Choose an option below.")
+        welcome_media_url = get_config("welcome_media_url", bot_id, "")
+        demo_url = get_config("demo_button_url", bot_id, "https://t.me/")
+        how_to_url = get_config("how_to_use_button_url", bot_id, "https://t.me/")
+
+        keyboard = [
+            [InlineKeyboardButton("💎 Get Premium", callback_data="get_premium")],
+            [InlineKeyboardButton("🎥 Premium Demo ↗", url=demo_url or "https://t.me/")],
+            [InlineKeyboardButton("✅ How To Get Premium? ↗", url=how_to_url or "https://t.me/")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        chat_id = update.effective_chat.id
+        await _send_with_photo_fallback(context, chat_id, welcome_media_url, welcome_text, reply_markup)
+    except Exception as e:
+        logger.error(f"send_welcome error: {e}")
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="👋 Welcome! Something went wrong loading the menu. Please try again.",
+            )
+        except Exception:
+            pass
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -43,91 +78,79 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_premium_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    await delete_previous(update, context)
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    await _safe_delete(query.message)
 
-    bot_id = context.bot_data.get("bot_id", "default")
-    premium_photo_url = get_config("premium_photo_url", bot_id, "")
-    premium_text = get_config("premium_text", bot_id, "🌟 <b>Get Premium Access!</b>\n\nChoose your payment method below.")
+    try:
+        bot_id = context.bot_data.get("bot_id", "default")
+        premium_photo_url = get_config("premium_photo_url", bot_id, "")
+        premium_text = get_config("premium_text", bot_id, "🌟 <b>Get Premium Access!</b>\n\nChoose your payment method below.")
 
-    keyboard = [
-        [InlineKeyboardButton("💳 PAY VIA UPI", callback_data="pay_upi")],
-        [InlineKeyboardButton("₿ PAY VIA CRYPTO", callback_data="pay_crypto")],
-        [InlineKeyboardButton("⬅️ BACK", callback_data="back_home")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    chat_id = update.effective_chat.id
-
-    if premium_photo_url:
-        await context.bot.send_photo(
-            chat_id=chat_id, photo=premium_photo_url,
-            caption=premium_text, reply_markup=reply_markup, parse_mode="HTML",
-        )
-    else:
-        await context.bot.send_message(
-            chat_id=chat_id, text=premium_text,
-            reply_markup=reply_markup, parse_mode="HTML",
-        )
+        keyboard = [
+            [InlineKeyboardButton("💳 PAY VIA UPI", callback_data="pay_upi")],
+            [InlineKeyboardButton("₿ PAY VIA CRYPTO", callback_data="pay_crypto")],
+            [InlineKeyboardButton("⬅️ BACK", callback_data="back_home")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await _send_with_photo_fallback(context, query.message.chat_id, premium_photo_url, premium_text, reply_markup)
+    except Exception as e:
+        logger.error(f"get_premium_callback error: {e}")
 
 
 async def pay_upi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    await delete_previous(update, context)
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    await _safe_delete(query.message)
 
-    bot_id = context.bot_data.get("bot_id", "default")
-    upi_qr_url = get_config("upi_qr_url", bot_id, "")
-    upi_message = get_config("upi_message", bot_id, "💳 <b>Pay via UPI</b>\n\nScan the QR code above.")
+    try:
+        bot_id = context.bot_data.get("bot_id", "default")
+        upi_qr_url = get_config("upi_qr_url", bot_id, "")
+        upi_message = get_config("upi_message", bot_id, "💳 <b>Pay via UPI</b>\n\nScan the QR code above.")
 
-    keyboard = [
-        [InlineKeyboardButton("✅ I HAVE PAID", callback_data="paid_upi")],
-        [InlineKeyboardButton("⬅️ BACK", callback_data="get_premium")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    chat_id = update.effective_chat.id
-
-    if upi_qr_url:
-        await context.bot.send_photo(
-            chat_id=chat_id, photo=upi_qr_url,
-            caption=upi_message, reply_markup=reply_markup, parse_mode="HTML",
-        )
-    else:
-        await context.bot.send_message(
-            chat_id=chat_id, text=upi_message,
-            reply_markup=reply_markup, parse_mode="HTML",
-        )
+        keyboard = [
+            [InlineKeyboardButton("✅ I HAVE PAID", callback_data="paid_upi")],
+            [InlineKeyboardButton("⬅️ BACK", callback_data="get_premium")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await _send_with_photo_fallback(context, query.message.chat_id, upi_qr_url, upi_message, reply_markup)
+    except Exception as e:
+        logger.error(f"pay_upi_callback error: {e}")
 
 
 async def pay_crypto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    await delete_previous(update, context)
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    await _safe_delete(query.message)
 
-    bot_id = context.bot_data.get("bot_id", "default")
-    crypto_qr_url = get_config("crypto_qr_url", bot_id, "")
-    crypto_message = get_config("crypto_message", bot_id, "₿ <b>Pay via Crypto</b>\n\nScan the QR code above.")
+    try:
+        bot_id = context.bot_data.get("bot_id", "default")
+        crypto_qr_url = get_config("crypto_qr_url", bot_id, "")
+        crypto_message = get_config("crypto_message", bot_id, "₿ <b>Pay via Crypto</b>\n\nScan the QR code above.")
 
-    keyboard = [
-        [InlineKeyboardButton("✅ I HAVE PAID", callback_data="paid_crypto")],
-        [InlineKeyboardButton("⬅️ BACK", callback_data="get_premium")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    chat_id = update.effective_chat.id
-
-    if crypto_qr_url:
-        await context.bot.send_photo(
-            chat_id=chat_id, photo=crypto_qr_url,
-            caption=crypto_message, reply_markup=reply_markup, parse_mode="HTML",
-        )
-    else:
-        await context.bot.send_message(
-            chat_id=chat_id, text=crypto_message,
-            reply_markup=reply_markup, parse_mode="HTML",
-        )
+        keyboard = [
+            [InlineKeyboardButton("✅ I HAVE PAID", callback_data="paid_crypto")],
+            [InlineKeyboardButton("⬅️ BACK", callback_data="get_premium")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await _send_with_photo_fallback(context, query.message.chat_id, crypto_qr_url, crypto_message, reply_markup)
+    except Exception as e:
+        logger.error(f"pay_crypto_callback error: {e}")
 
 
 async def back_home_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    await delete_previous(update, context)
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    await _safe_delete(query.message)
     await send_welcome(update, context)
