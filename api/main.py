@@ -133,6 +133,39 @@ def update_config(bot_id: str, key: str, body: ConfigUpdate):
     return {"key": key, "value": body.value}
 
 
+# ── Image Upload ───────────────────────────────────────────────────────────────
+
+from fastapi import UploadFile, File
+import uuid, mimetypes
+
+STORAGE_BUCKET = "bot-images"
+
+@app.post("/bots/{bot_id}/upload", dependencies=[Depends(verify_token)])
+async def upload_image(bot_id: str, file: UploadFile = File(...)):
+    """Upload an image to Supabase Storage and return its public URL."""
+    if bot_id not in BOT_TOKENS:
+        raise HTTPException(status_code=404, detail="Bot not found")
+
+    content = await file.read()
+    ext = (file.filename or "image.jpg").rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
+        raise HTTPException(status_code=400, detail="Only image files allowed")
+
+    filename = f"{bot_id}/{uuid.uuid4()}.{ext}"
+    content_type = file.content_type or f"image/{ext}"
+
+    try:
+        supabase.storage.from_(STORAGE_BUCKET).upload(
+            filename, content,
+            file_options={"content-type": content_type, "upsert": "true"}
+        )
+        public_url = supabase.storage.from_(STORAGE_BUCKET).get_public_url(filename)
+        return {"url": public_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+
 # ── Payments endpoints ────────────────────────────────────────────────────────
 
 @app.get("/payments", dependencies=[Depends(verify_token)])

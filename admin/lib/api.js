@@ -49,3 +49,13 @@ export async function updatePayment(id, status) {
     const res = await api.patch(`/payments/${id}`, { status });
     return res.data;
 }
+
+// ── Image Upload ───────────────────────────────────────────────────────────────
+export async function uploadImage(botId, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post(`/bots/${botId}/upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data.url;
+}

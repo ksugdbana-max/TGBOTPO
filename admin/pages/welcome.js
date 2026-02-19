@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
+import ImageUpload from '../components/ImageUpload';
 import { getAllConfig, updateConfig } from '../lib/api';
 import { useBot } from '../context/BotContext';
 import toast from 'react-hot-toast';
@@ -49,14 +50,14 @@ export default function WelcomePage() {
                     </div>
                     <div className="card">
                         <div className="card-title">🖼️ Welcome Photo</div>
-                        <div className="card-desc">Direct image URL or Telegram file_id shown with the welcome message.</div>
-                        <div className="form-group">
-                            <label className="form-label">Image URL or file_id</label>
-                            <input type="text" className="form-input" value={mediaUrl}
-                                onChange={(e) => setMediaUrl(e.target.value)} disabled={loading}
-                                placeholder="https://example.com/image.jpg" />
-                        </div>
-                        {mediaUrl && <img src={mediaUrl} alt="Preview" className="img-preview" onError={(e) => { e.target.style.display = 'none'; }} />}
+                        <div className="card-desc">Upload from your device or paste an image URL.</div>
+                        <ImageUpload
+                            botId={selectedBot.bot_id}
+                            value={mediaUrl}
+                            onChange={setMediaUrl}
+                            label="Welcome Photo"
+                            disabled={loading}
+                        />
                     </div>
                     <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
                         {saving ? <><span className="spinner" /> Saving...</> : '💾 Save Changes'}
