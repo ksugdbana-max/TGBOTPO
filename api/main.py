@@ -5,6 +5,7 @@ import os, datetime
 import httpx
 from supabase import create_client
 from dotenv import load_dotenv
+from telegram import Bot as TelegramBot
 
 load_dotenv()
 
@@ -164,8 +165,7 @@ async def update_payment(payment_id: str, body: PaymentAction):
     }).eq("id", payment_id).execute()
 
     if token:
-        import telegram
-        bot = telegram.Bot(token=token)
+        bot = TelegramBot(token=token)
         try:
             if body.status == "confirmed":
                 msg = _get_config_raw(
