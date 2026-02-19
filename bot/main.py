@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from telegram import Update
-from telegram.error import Conflict, NetworkError, TimedOut, TelegramError
+from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, ConversationHandler,
     MessageHandler, filters,
@@ -15,7 +15,7 @@ from bot.handlers.payment import (
     paid_upi_callback, paid_crypto_callback, receive_screenshot, cancel,
     WAITING_SCREENSHOT_UPI, WAITING_SCREENSHOT_CRYPTO,
 )
-from bot.handlers.admin import admin_command
+from bot.handlers.manage import build_manage_handler
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -27,15 +27,14 @@ logger = logging.getLogger(__name__)
 async def error_handler(update: object, context) -> None:
     """Global error handler — logs all errors, never crashes the bot."""
     err = context.error
+    bot_id = context.bot_data.get("bot_id", "?") if context.bot_data else "?"
     if isinstance(err, Conflict):
-        # Another instance is polling — this resolves itself on redeploy
-        logger.warning(f"[{context.bot_data.get('bot_id')}] Conflict: another instance polling. Will retry...")
+        logger.warning(f"[{bot_id}] Conflict: another instance polling. Will self-resolve...")
         return
     if isinstance(err, (NetworkError, TimedOut)):
-        logger.warning(f"[{context.bot_data.get('bot_id')}] Network issue: {err}. Auto-retrying...")
+        logger.warning(f"[{bot_id}] Network issue: {err}. Auto-retrying...")
         return
-    # For any other error — log but DO NOT crash
-    logger.error(f"[{context.bot_data.get('bot_id')}] Handler error: {err}", exc_info=err)
+    logger.error(f"[{bot_id}] Handler error: {err}", exc_info=err)
 
 
 def build_app(token: str, bot_id: str) -> Application:
@@ -60,8 +59,10 @@ def build_app(token: str, bot_id: str) -> Application:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    manage_conv = build_manage_handler()
+
     app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("admin", admin_command))
+    app.add_handler(manage_conv)          # /manage — full admin panel
     app.add_handler(payment_conv)
     app.add_handler(CallbackQueryHandler(get_premium_callback,  pattern="^get_premium$"))
     app.add_handler(CallbackQueryHandler(pay_upi_callback,      pattern="^pay_upi$"))
@@ -73,9 +74,9 @@ def build_app(token: str, bot_id: str) -> Application:
 
 async def run_bot(token: str, bot_id: str):
     """Run a single bot with auto-restart on any crash."""
-    RETRY_DELAY = 5  # seconds between retries
+    RETRY_DELAY = 5
 
-    while True:  # outer loop — auto-restart if anything goes wrong
+    while True:
         app = None
         try:
             logger.info(f"[{bot_id}] Starting...")
@@ -87,11 +88,9 @@ async def run_bot(token: str, bot_id: str):
                 allowed_updates=Update.ALL_TYPES,
             )
             logger.info(f"[{bot_id}] ✅ Running!")
-            await asyncio.Event().wait()  # keep alive forever
+            await asyncio.Event().wait()
 
         except Conflict:
-            # Another instance is running (happens during Render redeploy)
-            # Wait and let the new deployment take over
             logger.warning(f"[{bot_id}] Conflict — another instance running. Waiting {RETRY_DELAY}s...")
             await asyncio.sleep(RETRY_DELAY)
 
@@ -100,11 +99,10 @@ async def run_bot(token: str, bot_id: str):
             await asyncio.sleep(RETRY_DELAY)
 
         except Exception as e:
-            logger.error(f"[{bot_id}] Unexpected crash: {e}. Restarting in {RETRY_DELAY}s...")
+            logger.error(f"[{bot_id}] Crash: {e}. Restarting in {RETRY_DELAY}s...")
             await asyncio.sleep(RETRY_DELAY)
 
         finally:
-            # Always clean up before restarting
             if app:
                 try:
                     if app.updater and app.updater.running:
@@ -123,7 +121,6 @@ async def main():
         return
 
     logger.info(f"Starting {len(bot_tokens)} bot(s): {list(bot_tokens.keys())}")
-    # Run all bots concurrently — each has its own crash-proof retry loop
     await asyncio.gather(
         *[run_bot(token, bot_id) for bot_id, token in bot_tokens.items()]
     )
