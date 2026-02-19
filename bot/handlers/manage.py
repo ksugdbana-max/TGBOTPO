@@ -53,7 +53,7 @@ def is_admin(user_id: int, bot_id: str = "default") -> bool:
     AWAIT_UPI_QR, AWAIT_UPI_MSG,
     AWAIT_CRYPTO_QR, AWAIT_CRYPTO_MSG,
     AWAIT_DEMO_URL, AWAIT_HOW_TO_URL,
-    AWAIT_CONFIRMED_MSG,
+    AWAIT_JOIN_LINK,
     AWAIT_BROADCAST,
     AWAIT_ADD_ADMIN,
 ) = range(14)
@@ -71,7 +71,7 @@ def _main_kb():
          InlineKeyboardButton("👥 Users",         callback_data="mgr_users")],
         [InlineKeyboardButton("📊 Stats",         callback_data="mgr_stats"),
          InlineKeyboardButton("📢 Broadcast",     callback_data="mgr_broadcast")],
-        [InlineKeyboardButton("🎉 Confirm Msg",   callback_data="mgr_confirmed_msg")],
+        [InlineKeyboardButton("🔗 Join Link",    callback_data="mgr_join_link")],
         [InlineKeyboardButton("👤 Admin Control", callback_data="mgr_admin_control")],
     ])
 
@@ -400,14 +400,43 @@ async def cb_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         res = supabase.table("payments").select("*").eq("id", payment_id).single().execute()
         p = res.data
         supabase.table("payments").update({"status": "confirmed"}).eq("id", payment_id).execute()
-        msg = get_config(
-            "payment_confirmed_message", bot_id,
-            "🎉 <b>Payment Confirmed!</b>\n\nYour premium access has been activated. Thank you! 🙏"
+
+        # Get the join link from config
+        join_url = get_config("join_link", bot_id, "")
+        join_url = join_url.strip() if join_url else ""
+        # Normalize @username -> https://t.me/username
+        if join_url.startswith("@"):
+            join_url = f"https://t.me/{join_url[1:]}"
+        elif join_url and not join_url.startswith(("http://", "https://")):
+            join_url = f"https://{join_url}"
+
+        msg_text = (
+            "🎉 <b>Payment Confirmed!</b>\n\n"
+            "Your premium access has been activated. "
+            "Tap the button below to join. Thank you! 🙏"
         )
-        try:
-            await context.bot.send_message(chat_id=p["user_id"], text=msg, parse_mode="HTML")
-        except Exception as e:
-            logger.warning(f"Could not notify user {p['user_id']}: {e}")
+
+        if join_url:
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔗 Join Now", url=join_url)
+            ]])
+            try:
+                await context.bot.send_message(
+                    chat_id=p["user_id"], text=msg_text,
+                    reply_markup=kb, parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Could not notify user {p['user_id']}: {e}")
+        else:
+            # No join link set — send plain text
+            try:
+                await context.bot.send_message(
+                    chat_id=p["user_id"],
+                    text="🎉 <b>Payment Confirmed!</b>\n\nYour premium access has been activated. Thank you! 🙏",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Could not notify user {p['user_id']}: {e}")
 
         try:
             await update.callback_query.edit_message_caption(
@@ -649,17 +678,31 @@ async def recv_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _confirm(update, context, f"Broadcast done! ✅ {sent}/{total} delivered.")
 
 
-# ─── Section: Confirmed Message ───────────────────────────────────────────────
-async def cb_confirmed_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ─── Section: Join Link ──────────────────────────────────────────────────────
+async def cb_join_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     bot_id = context.bot_data.get("bot_id", "default")
-    cur = get_config("payment_confirmed_message", bot_id, "(not set)")
+    cur = get_config("join_link", bot_id, "(not set)")
     await _edit_or_send(update,
-        f"🎉 <b>Payment Confirmed Message</b>\n\n<i>{cur[:300]}</i>\n\n"
-        "Send the new message (HTML supported). Send /cancel to abort.",
+        f"🔗 <b>Join Link</b>\n\n"
+        f"<b>Current:</b> <code>{cur}</code>\n\n"
+        "This link is sent as a button when you approve a payment.\n"
+        "Send the new link (or @username). /cancel to abort.",
         _back_kb())
-    return AWAIT_CONFIRMED_MSG
+    return AWAIT_JOIN_LINK
 
+
+async def recv_join_link(update, context):
+    bot_id = context.bot_data.get("bot_id", "default")
+    url = _fix_url(update.message.text)
+    try:
+        set_config("join_link", url, bot_id)
+    except Exception as e:
+        logger.error(e)
+        await update.message.reply_text("❌ Save failed.")
+        return AWAIT_JOIN_LINK
+    await update.message.reply_text(f"✅ Saved: <code>{url}</code>", parse_mode="HTML")
+    return await _confirm(update, context, "Join link updated!")
 
 # ─── "Ask for input" shorthands ───────────────────────────────────────────────
 async def _ask(update, context, prompt, state):
@@ -811,12 +854,6 @@ async def recv_howto_url(update, context):
     await update.message.reply_text(f"✅ Saved: <code>{url}</code>", parse_mode="HTML")
     return await _confirm(update, context, "How-To URL updated!")
 
-async def recv_confirmed_msg(update, context):
-    bot_id = context.bot_data.get("bot_id", "default")
-    try:    set_config("payment_confirmed_message", update.message.text, bot_id)
-    except Exception as e:
-        logger.error(e); await update.message.reply_text("❌ Save failed."); return AWAIT_CONFIRMED_MSG
-    return await _confirm(update, context, "Confirmed message updated!")
 
 
 # ─── Cancel ───────────────────────────────────────────────────────────────────
@@ -845,7 +882,7 @@ def build_manage_handler() -> ConversationHandler:
                 CallbackQueryHandler(cb_users,             pattern="^mgr_users$"),
                 CallbackQueryHandler(cb_stats,             pattern="^mgr_stats$"),
                 CallbackQueryHandler(cb_broadcast,         pattern="^mgr_broadcast$"),
-                CallbackQueryHandler(cb_confirmed_msg,     pattern="^mgr_confirmed_msg$"),
+                CallbackQueryHandler(cb_join_link,        pattern="^mgr_join_link$"),
                 CallbackQueryHandler(cb_admin_control,     pattern="^mgr_admin_control$"),
                 CallbackQueryHandler(cb_add_admin,         pattern="^mgr_add_admin$"),
                 CallbackQueryHandler(cb_remove_admin,      pattern=r"^mgr_rmadmin_.+$"),
@@ -879,7 +916,7 @@ def build_manage_handler() -> ConversationHandler:
             AWAIT_CRYPTO_MSG:    [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_crypto_msg)],
             AWAIT_DEMO_URL:      [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_demo_url)],
             AWAIT_HOW_TO_URL:    [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_howto_url)],
-            AWAIT_CONFIRMED_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_confirmed_msg)],
+            AWAIT_JOIN_LINK:     [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_join_link)],
             AWAIT_BROADCAST:     [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_broadcast)],
             AWAIT_ADD_ADMIN:     [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_add_admin)],
         },
