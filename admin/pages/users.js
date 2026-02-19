@@ -1,104 +1,147 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { getPayments, updatePayment } from '../lib/api';
+import { getAllPayments, getBotPayments, updatePayment } from '../lib/api';
+import { useBot } from '../context/BotContext';
 import toast from 'react-hot-toast';
 
+const BOT_COLORS = ['#7c3aed', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444'];
+
 export default function UsersPage() {
+    const { bots, selectedBot } = useBot();
     const [payments, setPayments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState({});
     const [selectedScreenshot, setSelectedScreenshot] = useState(null);
-    const [filter, setFilter] = useState('all');
+    const [botFilter, setBotFilter] = useState('all');
+    const [statusFilter, setStatusFilter] = useState('all');
 
     const fetchPayments = () => {
         setLoading(true);
-        getPayments().then((data) => {
-            setPayments(data);
-            setLoading(false);
-        }).catch(() => setLoading(false));
+        getAllPayments().then(setPayments).finally(() => setLoading(false));
     };
 
     useEffect(() => { fetchPayments(); }, []);
 
     const handleAction = async (id, status) => {
-        setActionLoading((prev) => ({ ...prev, [id]: status }));
+        setActionLoading((p) => ({ ...p, [id]: status }));
         try {
             await updatePayment(id, status);
-            toast.success(status === 'confirmed' ? '✅ Payment confirmed! User notified.' : '❌ Payment rejected. User notified.');
-            setPayments((prev) => prev.map((p) => p.id === id ? { ...p, status } : p));
-        } catch {
-            toast.error('Action failed. Try again.');
-        } finally {
-            setActionLoading((prev) => ({ ...prev, [id]: null }));
-        }
+            toast.success(status === 'confirmed' ? '✅ Confirmed! User notified.' : '❌ Rejected. User notified.');
+            setPayments((p) => p.map((pay) => pay.id === id ? { ...pay, status } : pay));
+        } catch { toast.error('Action failed.'); }
+        finally { setActionLoading((p) => ({ ...p, [id]: null })); }
     };
 
-    const filtered = filter === 'all' ? payments : payments.filter(p => p.status === filter);
-
-    const formatDate = (iso) => {
-        if (!iso) return '—';
-        return new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+    const getBotColor = (botId) => {
+        const idx = bots.findIndex(b => b.bot_id === botId);
+        return BOT_COLORS[idx >= 0 ? idx % BOT_COLORS.length : 0];
     };
+
+    const getBotLabel = (botId) => {
+        const bot = bots.find(b => b.bot_id === botId);
+        return bot ? (bot.display_name || bot.first_name || botId) : botId;
+    };
+
+    const filtered = payments.filter(p => {
+        if (botFilter !== 'all' && p.bot_id !== botFilter) return false;
+        if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+        return true;
+    });
+
+    const stats = (botId) => ({
+        total: payments.filter(p => botId === 'all' ? true : p.bot_id === botId).length,
+        pending: payments.filter(p => (botId === 'all' ? true : p.bot_id === botId) && p.status === 'pending').length,
+        confirmed: payments.filter(p => (botId === 'all' ? true : p.bot_id === botId) && p.status === 'confirmed').length,
+        rejected: payments.filter(p => (botId === 'all' ? true : p.bot_id === botId) && p.status === 'rejected').length,
+    });
+
+    const allStats = stats('all');
+    const formatDate = (iso) => iso ? new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
     return (
-        <Layout title="Users & Payments" subtitle="Review payment screenshots and confirm or reject them">
+        <Layout title="All Payments" subtitle="Payments from all bots — filter by bot or status">
+
             {/* Screenshot Modal */}
             {selectedScreenshot && (
                 <div className="modal-overlay" onClick={() => setSelectedScreenshot(null)}>
-                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                             <div style={{ fontWeight: 600 }}>Payment Screenshot</div>
                             <button className="btn btn-ghost btn-sm" onClick={() => setSelectedScreenshot(null)}>✕ Close</button>
                         </div>
-                        <img
-                            src={`https://api.telegram.org/file/bot${process.env.NEXT_PUBLIC_BOT_TOKEN}/${selectedScreenshot}`}
-                            alt="Screenshot"
-                            className="modal-img"
-                            onError={(e) => {
-                                e.target.style.display = 'none';
-                                e.target.nextSibling.style.display = 'block';
-                            }}
-                        />
-                        <div style={{ display: 'none', color: 'var(--text-muted)', fontSize: 13, padding: 16 }}>
-                            ⚠️ Cannot preview directly. File ID: <code>{selectedScreenshot}</code><br />
-                            <small>To view, use the Telegram Bot API with your bot token.</small>
+                        <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 8, background: 'var(--bg-secondary)', borderRadius: 8 }}>
+                            📁 File ID: <code style={{ wordBreak: 'break-all' }}>{selectedScreenshot}</code>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Stats */}
+            {/* Global stats */}
             <div className="stats-grid" style={{ marginBottom: 20 }}>
                 {[
-                    { label: 'Total', count: payments.length, icon: '💳', cls: 'stat-icon-purple' },
-                    { label: 'Pending', count: payments.filter(p => p.status === 'pending').length, icon: '⏳', cls: 'stat-icon-yellow' },
-                    { label: 'Confirmed', count: payments.filter(p => p.status === 'confirmed').length, icon: '✅', cls: 'stat-icon-green' },
-                    { label: 'Rejected', count: payments.filter(p => p.status === 'rejected').length, icon: '❌', cls: 'stat-icon-red' },
+                    { label: 'Total', count: allStats.total, icon: '💳', cls: 'stat-icon-purple' },
+                    { label: 'Pending', count: allStats.pending, icon: '⏳', cls: 'stat-icon-yellow' },
+                    { label: 'Confirmed', count: allStats.confirmed, icon: '✅', cls: 'stat-icon-green' },
+                    { label: 'Rejected', count: allStats.rejected, icon: '❌', cls: 'stat-icon-red' },
                 ].map(s => (
                     <div className="stat-card" key={s.label}>
                         <div className={`stat-icon ${s.cls}`}>{s.icon}</div>
-                        <div>
-                            <div className="stat-value">{s.count}</div>
-                            <div className="stat-label">{s.label}</div>
-                        </div>
+                        <div><div className="stat-value">{s.count}</div><div className="stat-label">{s.label}</div></div>
                     </div>
                 ))}
             </div>
 
-            {/* Filter + Refresh */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-                {['all', 'pending', 'confirmed', 'rejected'].map((f) => (
-                    <button
-                        key={f}
-                        className={`btn btn-sm ${filter === f ? 'btn-primary' : 'btn-ghost'}`}
-                        onClick={() => setFilter(f)}
-                    >
-                        {f.charAt(0).toUpperCase() + f.slice(1)}
-                    </button>
-                ))}
-                <button className="btn btn-ghost btn-sm" onClick={fetchPayments} style={{ marginLeft: 'auto' }}>
-                    🔄 Refresh
-                </button>
+            {/* Per-bot mini stats */}
+            {bots.length > 1 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, marginBottom: 20 }}>
+                    {bots.map((bot, idx) => {
+                        const s = stats(bot.bot_id);
+                        const color = BOT_COLORS[idx % BOT_COLORS.length];
+                        return (
+                            <div key={bot.bot_id} className="card" style={{ padding: 16, borderColor: `${color}55`, cursor: 'pointer', marginBottom: 0 }}
+                                onClick={() => setBotFilter(botFilter === bot.bot_id ? 'all' : bot.bot_id)}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: `linear-gradient(135deg, ${color}, ${BOT_COLORS[(idx + 1) % BOT_COLORS.length]})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: 'white', fontWeight: 700 }}>
+                                        {(bot.display_name || bot.first_name || 'B')[0].toUpperCase()}
+                                    </div>
+                                    <div>
+                                        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>{bot.display_name || bot.first_name}</div>
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>@{bot.username}</div>
+                                    </div>
+                                    {botFilter === bot.bot_id && <span style={{ marginLeft: 'auto', fontSize: 11, background: `${color}33`, color, padding: '2px 8px', borderRadius: 100, fontWeight: 600 }}>Filtered</span>}
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, fontSize: 12, textAlign: 'center' }}>
+                                    <div style={{ background: 'var(--warning-light)', color: 'var(--warning)', borderRadius: 6, padding: '4px 0' }}><div style={{ fontWeight: 700 }}>{s.pending}</div>Pending</div>
+                                    <div style={{ background: 'var(--success-light)', color: 'var(--success)', borderRadius: 6, padding: '4px 0' }}><div style={{ fontWeight: 700 }}>{s.confirmed}</div>Done</div>
+                                    <div style={{ background: 'var(--danger-light)', color: 'var(--danger)', borderRadius: 6, padding: '4px 0' }}><div style={{ fontWeight: 700 }}>{s.rejected}</div>Rejected</div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {/* Filters + Refresh */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {['all', 'pending', 'confirmed', 'rejected'].map(f => (
+                        <button key={f} className={`btn btn-sm ${statusFilter === f ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setStatusFilter(f)}>
+                            {f.charAt(0).toUpperCase() + f.slice(1)}
+                        </button>
+                    ))}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button className={`btn btn-sm ${botFilter === 'all' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setBotFilter('all')}>All Bots</button>
+                    {bots.map((bot, idx) => (
+                        <button key={bot.bot_id}
+                            className={`btn btn-sm ${botFilter === bot.bot_id ? 'btn-primary' : 'btn-ghost'}`}
+                            onClick={() => setBotFilter(botFilter === bot.bot_id ? 'all' : bot.bot_id)}
+                            style={botFilter === bot.bot_id ? { background: BOT_COLORS[idx % BOT_COLORS.length] } : {}}>
+                            {bot.display_name || bot.first_name}
+                        </button>
+                    ))}
+                </div>
+                <button className="btn btn-ghost btn-sm" onClick={fetchPayments} style={{ marginLeft: 'auto' }}>🔄 Refresh</button>
             </div>
 
             {/* Table */}
@@ -106,6 +149,7 @@ export default function UsersPage() {
                 <table>
                     <thead>
                         <tr>
+                            <th>Bot</th>
                             <th>User</th>
                             <th>Type</th>
                             <th>Status</th>
@@ -116,58 +160,40 @@ export default function UsersPage() {
                     </thead>
                     <tbody>
                         {loading ? (
-                            <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>Loading...</td></tr>
+                            <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>Loading...</td></tr>
                         ) : filtered.length === 0 ? (
-                            <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>No payments found.</td></tr>
+                            <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>No payments found.</td></tr>
                         ) : filtered.map((p) => (
                             <tr key={p.id}>
                                 <td>
-                                    <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                                        {p.username || 'Unknown'}
-                                    </div>
-                                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>ID: {p.user_id}</div>
-                                </td>
-                                <td>
-                                    <span style={{ fontWeight: 600 }}>
-                                        {p.payment_type === 'upi' ? '💳 UPI' : '₿ Crypto'}
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 100, fontSize: 11, fontWeight: 600, background: `${getBotColor(p.bot_id)}22`, color: getBotColor(p.bot_id) }}>
+                                        🤖 {getBotLabel(p.bot_id)}
                                     </span>
                                 </td>
                                 <td>
-                                    <span className={`badge badge-${p.status}`}>{p.status}</span>
+                                    <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.username || 'Unknown'}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>ID: {p.user_id}</div>
                                 </td>
+                                <td><span style={{ fontWeight: 600 }}>{p.payment_type === 'upi' ? '💳 UPI' : '₿ Crypto'}</span></td>
+                                <td><span className={`badge badge-${p.status}`}>{p.status}</span></td>
                                 <td>
                                     {p.screenshot_file_id ? (
-                                        <button
-                                            className="btn btn-ghost btn-sm"
-                                            onClick={() => setSelectedScreenshot(p.screenshot_file_id)}
-                                        >
-                                            🖼️ View
-                                        </button>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => setSelectedScreenshot(p.screenshot_file_id)}>🖼️ View ID</button>
                                     ) : '—'}
                                 </td>
                                 <td style={{ fontSize: 12 }}>{formatDate(p.created_at)}</td>
                                 <td>
                                     {p.status === 'pending' ? (
                                         <div style={{ display: 'flex', gap: 6 }}>
-                                            <button
-                                                className="btn btn-success btn-sm"
-                                                onClick={() => handleAction(p.id, 'confirmed')}
-                                                disabled={!!actionLoading[p.id]}
-                                            >
-                                                {actionLoading[p.id] === 'confirmed' ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '✅ Confirm'}
+                                            <button className="btn btn-success btn-sm" onClick={() => handleAction(p.id, 'confirmed')} disabled={!!actionLoading[p.id]}>
+                                                {actionLoading[p.id] === 'confirmed' ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '✅'}
                                             </button>
-                                            <button
-                                                className="btn btn-danger btn-sm"
-                                                onClick={() => handleAction(p.id, 'rejected')}
-                                                disabled={!!actionLoading[p.id]}
-                                            >
-                                                {actionLoading[p.id] === 'rejected' ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '❌ Reject'}
+                                            <button className="btn btn-danger btn-sm" onClick={() => handleAction(p.id, 'rejected')} disabled={!!actionLoading[p.id]}>
+                                                {actionLoading[p.id] === 'rejected' ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '❌'}
                                             </button>
                                         </div>
                                     ) : (
-                                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                                            {p.status === 'confirmed' ? '✅ Done' : '❌ Done'}
-                                        </span>
+                                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.status === 'confirmed' ? '✅ Done' : '❌ Done'}</span>
                                     )}
                                 </td>
                             </tr>

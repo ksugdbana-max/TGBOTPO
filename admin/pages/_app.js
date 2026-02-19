@@ -1,9 +1,10 @@
 import '../styles/globals.css';
 import { Toaster } from 'react-hot-toast';
+import { BotProvider } from '../context/BotContext';
 
 export default function App({ Component, pageProps }) {
     return (
-        <>
+        <BotProvider>
             <Toaster
                 position="top-right"
                 toastOptions={{
@@ -19,6 +20,6 @@ export default function App({ Component, pageProps }) {
                 }}
             />
             <Component {...pageProps} />
-        </>
+        </BotProvider>
     );
 }

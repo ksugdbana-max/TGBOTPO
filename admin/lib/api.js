@@ -2,42 +2,46 @@ import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-export const api = axios.create({
-    baseURL: API_URL,
-});
+export const api = axios.create({ baseURL: API_URL });
 
-// Attach token from localStorage to every request
 api.interceptors.request.use((config) => {
     if (typeof window !== 'undefined') {
         const token = localStorage.getItem('admin_token');
-        if (token) {
-            config.headers['x-api-key'] = token;
-        }
+        if (token) config.headers['x-api-key'] = token;
     }
     return config;
 });
 
+// ── Auth ──────────────────────────────────────────────────────────────────────
 export async function login(password) {
     const res = await api.post('/auth/login', { password });
     return res.data.token;
 }
 
-export async function getAllConfig() {
-    const res = await api.get('/config');
+// ── Bots ──────────────────────────────────────────────────────────────────────
+export async function getBots() {
+    const res = await api.get('/bots');
     return res.data;
 }
 
-export async function getConfig(key) {
-    const res = await api.get(`/config/${key}`);
-    return res.data.value;
+// ── Config (per bot) ──────────────────────────────────────────────────────────
+export async function getAllConfig(botId) {
+    const res = await api.get(`/bots/${botId}/config`);
+    return res.data;
 }
 
-export async function updateConfig(key, value) {
-    await api.put(`/config/${key}`, { value });
+export async function updateConfig(botId, key, value) {
+    await api.put(`/bots/${botId}/config/${key}`, { value });
 }
 
-export async function getPayments() {
+// ── Payments ──────────────────────────────────────────────────────────────────
+export async function getAllPayments() {
     const res = await api.get('/payments');
+    return res.data;
+}
+
+export async function getBotPayments(botId) {
+    const res = await api.get(`/bots/${botId}/payments`);
     return res.data;
 }
 

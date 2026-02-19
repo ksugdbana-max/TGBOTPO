@@ -1,77 +1,61 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { getAllConfig, updateConfig } from '../lib/api';
+import { useBot } from '../context/BotContext';
 import toast from 'react-hot-toast';
 
 export default function ConfirmationPage() {
+    const { selectedBot } = useBot();
     const [confirmMsg, setConfirmMsg] = useState('');
     const [saving, setSaving] = useState(false);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        getAllConfig().then((cfg) => {
+        if (!selectedBot) return;
+        setLoading(true);
+        getAllConfig(selectedBot.bot_id).then((cfg) => {
             setConfirmMsg(cfg.payment_confirmed_message || '');
-            setLoading(false);
-        }).catch(() => setLoading(false));
-    }, []);
+        }).finally(() => setLoading(false));
+    }, [selectedBot]);
 
     const handleSave = async () => {
+        if (!selectedBot) return;
         setSaving(true);
         try {
-            await updateConfig('payment_confirmed_message', confirmMsg);
+            await updateConfig(selectedBot.bot_id, 'payment_confirmed_message', confirmMsg);
             toast.success('Confirmation message saved! ✅');
-        } catch {
-            toast.error('Failed to save.');
-        } finally {
-            setSaving(false);
-        }
+        } catch { toast.error('Failed to save.'); }
+        finally { setSaving(false); }
     };
 
-    const defaultRejection = `❌ Payment Rejected\n\nUnfortunately, we could not verify your payment screenshot.\nPlease make sure you send a clear screenshot showing the successful transaction.\nIf you believe this is a mistake, please contact support.\nYou can try again by sending /start. 🙏`;
-
     return (
-        <Layout title="Confirmation Message" subtitle="Set the message sent to users when their payment is confirmed">
-            <div className="card">
-                <div className="card-title">✅ Payment Confirmed Message</div>
-                <div className="card-desc">
-                    This message is sent to the user when you confirm their payment in the Users section. Supports HTML formatting.
-                </div>
-                <div className="form-group">
-                    <label className="form-label">Confirmation Message</label>
-                    <textarea
-                        className="form-textarea"
-                        style={{ minHeight: 160 }}
-                        value={confirmMsg}
-                        onChange={(e) => setConfirmMsg(e.target.value)}
-                        placeholder="🎉 <b>Payment Confirmed!</b>&#10;&#10;Your premium access has been activated. Welcome! 🌟"
-                        disabled={loading}
-                    />
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    💡 Tip: Use <code style={{ background: 'var(--bg-secondary)', padding: '1px 4px', borderRadius: 4 }}>&lt;b&gt;bold&lt;/b&gt;</code> for formatting.
-                </div>
-            </div>
-
-            <div className="card" style={{ borderColor: 'rgba(239,68,68,0.3)', background: 'var(--danger-light)' }}>
-                <div className="card-title">❌ Payment Rejected Message (Fixed)</div>
-                <div className="card-desc">This message is automatically sent when you reject a payment. It cannot be changed.</div>
-                <div style={{
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '14px',
-                    fontSize: 13,
-                    color: 'var(--text-secondary)',
-                    whiteSpace: 'pre-line',
-                    lineHeight: 1.7,
-                }}>
-                    {defaultRejection}
-                </div>
-            </div>
-
-            <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
-                {saving ? <><span className="spinner" /> Saving...</> : '💾 Save Changes'}
-            </button>
+        <Layout title="Confirmation Message" subtitle="Message sent to users when their payment is approved">
+            {!selectedBot ? (
+                <div className="card"><div className="card-desc">← Select a bot from the sidebar.</div></div>
+            ) : (
+                <>
+                    <div className="card">
+                        <div className="card-title">✅ Payment Confirmed Message</div>
+                        <div className="card-desc">Sent to the user when you confirm their payment. HTML supported.</div>
+                        <div className="form-group" style={{ marginTop: 12 }}>
+                            <label className="form-label">Confirmation Message</label>
+                            <textarea className="form-textarea" style={{ minHeight: 160 }} value={confirmMsg}
+                                onChange={(e) => setConfirmMsg(e.target.value)} disabled={loading}
+                                placeholder="🎉 <b>Payment Confirmed!</b>&#10;&#10;Your premium access has been activated! 🌟" />
+                        </div>
+                    </div>
+                    <div className="card" style={{ borderColor: 'rgba(239,68,68,0.3)', background: 'var(--danger-light)' }}>
+                        <div className="card-title">❌ Payment Rejected Message (Fixed)</div>
+                        <div className="card-desc">Auto-sent on rejection. Cannot be changed.</div>
+                        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 14, fontSize: 13, color: 'var(--text-secondary)', whiteSpace: 'pre-line', lineHeight: 1.7 }}>
+                            {`❌ Payment Rejected\n\nUnfortunately, we could not verify your payment screenshot.\nPlease send a clear screenshot of the successful transaction.\nIf you believe this is a mistake, contact support.\nTry again with /start. 🙏`}
+                        </div>
+                    </div>
+                    <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
+                        {saving ? <><span className="spinner" /> Saving...</> : '💾 Save Changes'}
+                    </button>
+                </>
+            )}
         </Layout>
     );
 }

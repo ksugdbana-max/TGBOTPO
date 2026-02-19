@@ -1,86 +1,68 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { getAllConfig, updateConfig } from '../lib/api';
+import { useBot } from '../context/BotContext';
 import toast from 'react-hot-toast';
 
 export default function WelcomePage() {
+    const { selectedBot } = useBot();
     const [text, setText] = useState('');
     const [mediaUrl, setMediaUrl] = useState('');
     const [saving, setSaving] = useState(false);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        getAllConfig().then((cfg) => {
+        if (!selectedBot) return;
+        setLoading(true);
+        getAllConfig(selectedBot.bot_id).then((cfg) => {
             setText(cfg.welcome_text || '');
             setMediaUrl(cfg.welcome_media_url || '');
-            setLoading(false);
-        }).catch(() => setLoading(false));
-    }, []);
+        }).finally(() => setLoading(false));
+    }, [selectedBot]);
 
     const handleSave = async () => {
+        if (!selectedBot) return;
         setSaving(true);
         try {
-            await updateConfig('welcome_text', text);
-            await updateConfig('welcome_media_url', mediaUrl);
+            await updateConfig(selectedBot.bot_id, 'welcome_text', text);
+            await updateConfig(selectedBot.bot_id, 'welcome_media_url', mediaUrl);
             toast.success('Welcome message saved! ✅');
-        } catch {
-            toast.error('Failed to save. Check your connection.');
-        } finally {
-            setSaving(false);
-        }
+        } catch { toast.error('Failed to save.'); }
+        finally { setSaving(false); }
     };
 
     return (
-        <Layout title="Welcome Message" subtitle="Configure the first message users see when they start the bot">
-            <div className="card">
-                <div className="card-title">👋 Welcome Text</div>
-                <div className="card-desc">This text appears as the caption of the welcome photo. Supports HTML formatting (bold, italic, etc.)</div>
-                <div className="form-group">
-                    <label className="form-label">Message Text (HTML supported)</label>
-                    <textarea
-                        className="form-textarea"
-                        style={{ minHeight: 140 }}
-                        value={text}
-                        onChange={(e) => setText(e.target.value)}
-                        placeholder="👋 Welcome to our bot! Choose an option below."
-                        disabled={loading}
-                    />
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-                    💡 Tip: Use <code style={{ background: 'var(--bg-secondary)', padding: '1px 4px', borderRadius: 4 }}>&lt;b&gt;bold&lt;/b&gt;</code>, <code style={{ background: 'var(--bg-secondary)', padding: '1px 4px', borderRadius: 4 }}>&lt;i&gt;italic&lt;/i&gt;</code> for formatting.
-                </div>
-            </div>
-
-            <div className="card">
-                <div className="card-title">🖼️ Welcome Photo</div>
-                <div className="card-desc">Enter a direct image URL or a Telegram file_id. This photo will be shown with the welcome message.</div>
-                <div className="form-group">
-                    <label className="form-label">Image URL or Telegram file_id</label>
-                    <input
-                        type="text"
-                        className="form-input"
-                        value={mediaUrl}
-                        onChange={(e) => setMediaUrl(e.target.value)}
-                        placeholder="https://example.com/image.jpg"
-                        disabled={loading}
-                    />
-                </div>
-                {mediaUrl && (
-                    <div>
-                        <div className="form-label">Preview</div>
-                        <img
-                            src={mediaUrl}
-                            alt="Welcome preview"
-                            className="img-preview"
-                            onError={(e) => { e.target.style.display = 'none'; }}
-                        />
+        <Layout title="Welcome Message" subtitle="First message users see when they tap /start">
+            {!selectedBot ? (
+                <div className="card"><div className="card-desc">← Select a bot from the sidebar to configure.</div></div>
+            ) : (
+                <>
+                    <div className="card">
+                        <div className="card-title">👋 Welcome Text</div>
+                        <div className="card-desc">Caption shown with the welcome photo. HTML supported.</div>
+                        <div className="form-group">
+                            <label className="form-label">Message Text</label>
+                            <textarea className="form-textarea" style={{ minHeight: 140 }} value={text}
+                                onChange={(e) => setText(e.target.value)} disabled={loading}
+                                placeholder="👋 Welcome! Choose an option below." />
+                        </div>
                     </div>
-                )}
-            </div>
-
-            <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
-                {saving ? <><span className="spinner" /> Saving...</> : '💾 Save Changes'}
-            </button>
+                    <div className="card">
+                        <div className="card-title">🖼️ Welcome Photo</div>
+                        <div className="card-desc">Direct image URL or Telegram file_id shown with the welcome message.</div>
+                        <div className="form-group">
+                            <label className="form-label">Image URL or file_id</label>
+                            <input type="text" className="form-input" value={mediaUrl}
+                                onChange={(e) => setMediaUrl(e.target.value)} disabled={loading}
+                                placeholder="https://example.com/image.jpg" />
+                        </div>
+                        {mediaUrl && <img src={mediaUrl} alt="Preview" className="img-preview" onError={(e) => { e.target.style.display = 'none'; }} />}
+                    </div>
+                    <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
+                        {saving ? <><span className="spinner" /> Saving...</> : '💾 Save Changes'}
+                    </button>
+                </>
+            )}
         </Layout>
     );
 }
