@@ -3,9 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import os
-from bot.config import supabase, get_config, set_config, ADMIN_PASSWORD, API_SECRET
+from bot.config import supabase, get_config, set_config, ADMIN_PASSWORD, API_SECRET, BOT_ID
 import datetime
-import asyncio
 import telegram
 
 app = FastAPI(title="TG Bot Admin API")
@@ -37,6 +36,14 @@ def verify_token(x_api_key: str = Header(...)):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+# ── Bot Info ──────────────────────────────────────────────────────────────────
+
+@app.get("/info", dependencies=[Depends(verify_token)])
+def get_info():
+    """Return which BOT_ID this instance is running as."""
+    return {"bot_id": BOT_ID}
+
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 class ConfigUpdate(BaseModel):
@@ -54,7 +61,12 @@ def update_config_endpoint(key: str, body: ConfigUpdate):
 
 @app.get("/config", dependencies=[Depends(verify_token)])
 def get_all_config():
-    res = supabase.table("bot_config").select("*").execute()
+    res = (
+        supabase.table("bot_config")
+        .select("key, value")
+        .eq("bot_id", BOT_ID)
+        .execute()
+    )
     return {row["key"]: row["value"] for row in (res.data or [])}
 
 
@@ -62,7 +74,13 @@ def get_all_config():
 
 @app.get("/payments", dependencies=[Depends(verify_token)])
 def get_payments():
-    res = supabase.table("payments").select("*").order("created_at", desc=True).execute()
+    res = (
+        supabase.table("payments")
+        .select("*")
+        .eq("bot_id", BOT_ID)
+        .order("created_at", desc=True)
+        .execute()
+    )
     return res.data or []
 
 class PaymentAction(BaseModel):
@@ -73,8 +91,15 @@ async def update_payment(payment_id: str, body: PaymentAction):
     if body.status not in ("confirmed", "rejected"):
         raise HTTPException(status_code=400, detail="status must be 'confirmed' or 'rejected'")
 
-    # Fetch payment
-    res = supabase.table("payments").select("*").eq("id", payment_id).single().execute()
+    # Fetch payment (scoped to this bot)
+    res = (
+        supabase.table("payments")
+        .select("*")
+        .eq("id", payment_id)
+        .eq("bot_id", BOT_ID)
+        .single()
+        .execute()
+    )
     if not res.data:
         raise HTTPException(status_code=404, detail="Payment not found")
 
@@ -87,7 +112,7 @@ async def update_payment(payment_id: str, body: PaymentAction):
         "updated_at": datetime.datetime.utcnow().isoformat(),
     }).eq("id", payment_id).execute()
 
-    # Send notification to user via Telegram
+    # Notify user via Telegram
     bot = telegram.Bot(token=BOT_TOKEN)
     try:
         if body.status == "confirmed":
@@ -104,7 +129,7 @@ async def update_payment(payment_id: str, body: PaymentAction):
                 "You can try again by sending /start. 🙏"
             )
         await bot.send_message(chat_id=user_id, text=msg, parse_mode="HTML")
-    except Exception as e:
-        pass  # Don't fail the API if Telegram message fails
+    except Exception:
+        pass
 
     return {"id": payment_id, "status": body.status}

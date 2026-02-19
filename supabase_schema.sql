@@ -1,32 +1,43 @@
 -- ============================================================
--- Supabase SQL Schema for Telegram Bot
+-- Supabase SQL Schema for Telegram Bot (Multi-Bot / BOT_ID support)
 -- Run this in your Supabase SQL Editor
 -- ============================================================
 
--- Bot configuration table
+-- Bot configuration table (one row per bot_id + key)
 CREATE TABLE IF NOT EXISTS bot_config (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL DEFAULT ''
+  bot_id TEXT NOT NULL DEFAULT 'default',
+  key    TEXT NOT NULL,
+  value  TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (bot_id, key)
 );
 
--- Insert default config values
-INSERT INTO bot_config (key, value) VALUES
-  ('welcome_text',               '👋 <b>Welcome!</b>\n\nChoose an option below to get started.'),
-  ('welcome_media_url',          ''),
-  ('demo_button_url',            'https://t.me/'),
-  ('how_to_use_button_url',      'https://t.me/'),
-  ('premium_photo_url',          ''),
-  ('premium_text',               '🌟 <b>Get Premium Access!</b>\n\nChoose your payment method below.'),
-  ('upi_qr_url',                 ''),
-  ('upi_message',                '💳 <b>Pay via UPI</b>\n\nScan the QR code above and complete your payment.\nAfter paying, tap the button below.'),
-  ('crypto_qr_url',              ''),
-  ('crypto_message',             '₿ <b>Pay via Crypto</b>\n\nSend payment to the wallet shown above.\nAfter paying, tap the button below.'),
-  ('payment_confirmed_message',  '🎉 <b>Payment Confirmed!</b>\n\nYour premium access has been activated. Welcome to the premium club! 🌟\n\nEnjoy all the exclusive features. Thank you for your trust! 🙏')
-ON CONFLICT (key) DO NOTHING;
+-- Insert default config for bot1, bot2, bot3
+DO $$
+DECLARE
+  bots TEXT[] := ARRAY['bot1', 'bot2', 'bot3'];
+  b TEXT;
+BEGIN
+  FOREACH b IN ARRAY bots LOOP
+    INSERT INTO bot_config (bot_id, key, value) VALUES
+      (b, 'welcome_text',              '👋 <b>Welcome!</b>\n\nChoose an option below to get started.'),
+      (b, 'welcome_media_url',         ''),
+      (b, 'demo_button_url',           'https://t.me/'),
+      (b, 'how_to_use_button_url',     'https://t.me/'),
+      (b, 'premium_photo_url',         ''),
+      (b, 'premium_text',              '🌟 <b>Get Premium Access!</b>\n\nChoose your payment method below.'),
+      (b, 'upi_qr_url',               ''),
+      (b, 'upi_message',              '💳 <b>Pay via UPI</b>\n\nScan the QR code above and complete your payment.\nAfter paying, tap the button below.'),
+      (b, 'crypto_qr_url',            ''),
+      (b, 'crypto_message',           '₿ <b>Pay via Crypto</b>\n\nSend payment to the wallet shown above.\nAfter paying, tap the button below.'),
+      (b, 'payment_confirmed_message', '🎉 <b>Payment Confirmed!</b>\n\nYour premium access has been activated. Welcome! 🌟\n\nThank you for your trust! 🙏')
+    ON CONFLICT (bot_id, key) DO NOTHING;
+  END LOOP;
+END $$;
 
--- Payments table
+-- Payments table (each row tagged with bot_id)
 CREATE TABLE IF NOT EXISTS payments (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id              TEXT NOT NULL DEFAULT 'default',
   user_id             BIGINT NOT NULL,
   username            TEXT,
   payment_type        TEXT NOT NULL CHECK (payment_type IN ('upi', 'crypto')),
@@ -36,10 +47,6 @@ CREATE TABLE IF NOT EXISTS payments (
   updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Index for fast user lookups
+CREATE INDEX IF NOT EXISTS idx_payments_bot_id  ON payments (bot_id);
 CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
-CREATE INDEX IF NOT EXISTS idx_payments_status   ON payments (status);
-
--- Enable Row Level Security (optional but recommended)
--- ALTER TABLE bot_config ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_payments_status  ON payments (status);

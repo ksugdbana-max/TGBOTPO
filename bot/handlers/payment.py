@@ -1,6 +1,6 @@
 from telegram import Update, ForceReply
 from telegram.ext import ContextTypes, ConversationHandler
-from bot.config import get_config, supabase
+from bot.config import get_config, supabase, BOT_ID
 import datetime
 
 WAITING_SCREENSHOT_UPI = 1
@@ -58,6 +58,7 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Save to Supabase
     try:
         supabase.table("payments").insert({
+            "bot_id": BOT_ID,
             "user_id": user.id,
             "username": user.username or user.first_name or str(user.id),
             "payment_type": payment_type,
