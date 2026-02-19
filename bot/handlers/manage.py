@@ -31,8 +31,18 @@ def _admin_id() -> int:
         return 0
 
 
-def is_admin(user_id: int) -> bool:
-    return user_id == _admin_id()
+def is_admin(user_id: int, bot_id: str = "default") -> bool:
+    """Check primary admin OR extra admins stored in Supabase."""
+    if user_id == _admin_id():
+        return True
+    try:
+        raw = get_config("extra_admins", bot_id, "")
+        if raw:
+            ids = [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
+            return user_id in ids
+    except Exception:
+        pass
+    return False
 
 
 # ─── States ───────────────────────────────────────────────────────────────────
@@ -45,7 +55,8 @@ def is_admin(user_id: int) -> bool:
     AWAIT_DEMO_URL, AWAIT_HOW_TO_URL,
     AWAIT_CONFIRMED_MSG,
     AWAIT_BROADCAST,
-) = range(13)
+    AWAIT_ADD_ADMIN,
+) = range(14)
 
 
 # ─── Keyboards ────────────────────────────────────────────────────────────────
@@ -61,6 +72,7 @@ def _main_kb():
         [InlineKeyboardButton("📊 Stats",         callback_data="mgr_stats"),
          InlineKeyboardButton("📢 Broadcast",     callback_data="mgr_broadcast")],
         [InlineKeyboardButton("🎉 Confirm Msg",   callback_data="mgr_confirmed_msg")],
+        [InlineKeyboardButton("👤 Admin Control", callback_data="mgr_admin_control")],
     ])
 
 
@@ -157,7 +169,8 @@ async def _show_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def manage_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    bot_id = context.bot_data.get("bot_id", "default")
+    if not is_admin(update.effective_user.id, bot_id):
         try:
             await update.message.reply_text("⛔ You are not authorized to use this command.")
         except Exception:
@@ -438,6 +451,93 @@ async def cb_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MAIN_MENU
 
 
+# ─── Section: Admin Control ──────────────────────────────────────────────────
+async def cb_admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    bot_id = context.bot_data.get("bot_id", "default")
+    raw = get_config("extra_admins", bot_id, "")
+    extra_ids = [x.strip() for x in raw.split(",") if x.strip().isdigit()] if raw else []
+
+    lines = [f"👤 <b>Admin Control — {bot_id.upper()}</b>\n"]
+    lines.append(f"<b>Primary Admin:</b> <code>{_admin_id()}</code>\n")
+    if extra_ids:
+        lines.append("<b>Extra Admins:</b>")
+        for uid in extra_ids:
+            lines.append(f"  • <code>{uid}</code>")
+    else:
+        lines.append("<b>Extra Admins:</b> None")
+
+    # Build keyboard: remove buttons for each extra admin + add button
+    rows = []
+    for uid in extra_ids:
+        rows.append([InlineKeyboardButton(f"➖ Remove {uid}", callback_data=f"mgr_rmadmin_{uid}")])
+    rows.append([InlineKeyboardButton("➕ Add Admin", callback_data="mgr_add_admin")])
+    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="mgr_main")])
+
+    await _edit_or_send(update, "\n".join(lines), InlineKeyboardMarkup(rows))
+    return MAIN_MENU
+
+
+async def cb_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _edit_or_send(update,
+        "➕ <b>Add Admin</b>\n\n"
+        "Send the <b>@username</b> (must have used this bot) or the numeric <b>User ID</b> of the person to promote.\n\n"
+        "/cancel to abort.",
+        _back_kb())
+    return AWAIT_ADD_ADMIN
+
+
+async def recv_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot_id = context.bot_data.get("bot_id", "default")
+    text = update.message.text.strip().lstrip("@")
+    new_id = None
+
+    # Try numeric ID first
+    if text.isdigit():
+        new_id = int(text)
+    else:
+        # Search by username in payments table
+        try:
+            res = (supabase.table("payments")
+                   .select("user_id")
+                   .eq("bot_id", bot_id)
+                   .ilike("username", text)
+                   .limit(1)
+                   .execute())
+            if res.data:
+                new_id = res.data[0]["user_id"]
+        except Exception as e:
+            logger.error(f"recv_add_admin lookup error: {e}")
+
+    if not new_id:
+        await update.message.reply_text(
+            "❌ User not found. Make sure they have used this bot before, or send their numeric Telegram ID.")
+        return AWAIT_ADD_ADMIN
+
+    # Don't double-add
+    raw = get_config("extra_admins", bot_id, "")
+    ids = [x.strip() for x in raw.split(",") if x.strip().isdigit()] if raw else []
+    if str(new_id) not in ids:
+        ids.append(str(new_id))
+        set_config("extra_admins", ",".join(ids), bot_id)
+
+    await update.message.reply_text(
+        f"✅ <b>Admin added!</b> User <code>{new_id}</code> can now use /manage on this bot.",
+        parse_mode="HTML")
+    return await _confirm(update, context, f"Admin {new_id} added!")
+
+
+async def cb_remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer("Removing...")
+    bot_id = context.bot_data.get("bot_id", "default")
+    rm_id = update.callback_query.data.replace("mgr_rmadmin_", "").strip()
+    raw = get_config("extra_admins", bot_id, "")
+    ids = [x.strip() for x in raw.split(",") if x.strip().isdigit() and x.strip() != rm_id] if raw else []
+    set_config("extra_admins", ",".join(ids), bot_id)
+    return await cb_admin_control(update, context)
+
+
 # ─── Section: Broadcast ───────────────────────────────────────────────────────
 async def cb_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
@@ -685,6 +785,9 @@ def build_manage_handler() -> ConversationHandler:
                 CallbackQueryHandler(cb_stats,             pattern="^mgr_stats$"),
                 CallbackQueryHandler(cb_broadcast,         pattern="^mgr_broadcast$"),
                 CallbackQueryHandler(cb_confirmed_msg,     pattern="^mgr_confirmed_msg$"),
+                CallbackQueryHandler(cb_admin_control,     pattern="^mgr_admin_control$"),
+                CallbackQueryHandler(cb_add_admin,         pattern="^mgr_add_admin$"),
+                CallbackQueryHandler(cb_remove_admin,      pattern=r"^mgr_rmadmin_.+$"),
                 # Set prompts
                 CallbackQueryHandler(cb_set_welcome_text,  pattern="^mgr_set_welcome_text$"),
                 CallbackQueryHandler(cb_set_welcome_photo, pattern="^mgr_set_welcome_photo$"),
@@ -717,6 +820,7 @@ def build_manage_handler() -> ConversationHandler:
             AWAIT_HOW_TO_URL:    [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_howto_url)],
             AWAIT_CONFIRMED_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_confirmed_msg)],
             AWAIT_BROADCAST:     [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_broadcast)],
+            AWAIT_ADD_ADMIN:     [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_add_admin)],
         },
         fallbacks=[CommandHandler("cancel", cancel_manage)],
         allow_reentry=True,
