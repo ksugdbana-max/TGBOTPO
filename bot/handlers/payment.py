@@ -1,6 +1,7 @@
+import os
 import logging
 import datetime
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from bot.config import supabase
 
@@ -8,6 +9,13 @@ logger = logging.getLogger(__name__)
 
 WAITING_SCREENSHOT_UPI = 1
 WAITING_SCREENSHOT_CRYPTO = 2
+
+
+def _admin_id() -> int:
+    try:
+        return int(os.getenv("ADMIN_TELEGRAM_ID", "0"))
+    except Exception:
+        return 0
 
 
 async def paid_upi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -59,7 +67,7 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
     payment_type = context.user_data.get("payment_type", "upi")
     bot_id = context.bot_data.get("bot_id", "default")
 
-    # Handle document images too
+    # Accept photo or document image
     if update.message.photo:
         file_id = update.message.photo[-1].file_id
     elif update.message.document:
@@ -71,8 +79,10 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
             pass
         return WAITING_SCREENSHOT_UPI if payment_type == "upi" else WAITING_SCREENSHOT_CRYPTO
 
+    # Save to Supabase
+    payment_id = None
     try:
-        supabase.table("payments").insert({
+        result = supabase.table("payments").insert({
             "bot_id": bot_id,
             "user_id": user.id,
             "username": user.username or user.first_name or str(user.id),
@@ -82,7 +92,9 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "created_at": datetime.datetime.utcnow().isoformat(),
             "updated_at": datetime.datetime.utcnow().isoformat(),
         }).execute()
-        logger.info(f"[{bot_id}] Payment saved for user {user.id} ({payment_type})")
+        if result.data:
+            payment_id = result.data[0].get("id")
+        logger.info(f"[{bot_id}] Payment saved for user {user.id} ({payment_type}) id={payment_id}")
     except Exception as e:
         logger.error(f"[{bot_id}] Supabase insert failed: {e}")
         try:
@@ -94,6 +106,7 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
             pass
         return ConversationHandler.END
 
+    # Confirm to user immediately
     try:
         await update.message.reply_text(
             "✅ <b>Screenshot received!</b>\n\nOur admin will verify your payment shortly. "
@@ -102,6 +115,42 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
     except Exception as e:
         logger.error(f"reply_text error: {e}")
+
+    # ── Notify admin — real-time payment card with Approve/Reject ────────────
+    admin_id = _admin_id()
+    if admin_id and payment_id:
+        username_str = f"@{user.username}" if user.username else str(user.id)
+        caption = (
+            f"💰 <b>PAYMENT REQUEST</b>\n\n"
+            f"🤖 Bot: <b>{bot_id.upper()}</b>\n"
+            f"👤 User: {username_str}\n"
+            f"🆔 ID: <code>{user.id}</code>\n"
+            f"💳 Method: <b>{payment_type.upper()}</b>\n\n"
+            f"<i>First admin action will be final.</i>"
+        )
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ APPROVE", callback_data=f"mgr_approve_{payment_id}"),
+            InlineKeyboardButton("❌ REJECT",  callback_data=f"mgr_reject_{payment_id}"),
+        ]])
+        try:
+            await context.bot.send_photo(
+                chat_id=admin_id,
+                photo=file_id,
+                caption=caption,
+                reply_markup=kb,
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"[{bot_id}] Admin photo notify failed: {e} — trying text")
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=caption,
+                    reply_markup=kb,
+                    parse_mode="HTML",
+                )
+            except Exception as e2:
+                logger.error(f"[{bot_id}] Admin notify completely failed: {e2}")
 
     context.user_data.clear()
     return ConversationHandler.END
