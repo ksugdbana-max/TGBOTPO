@@ -589,23 +589,32 @@ async def cb_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_id = context.bot_data.get("bot_id", "default")
     # Pre-load user count so admin knows what they're broadcasting to
     try:
-        # 1. Users from payments (all statuses)
-        res = (supabase.table("payments")
-               .select("user_id")
-               .eq("bot_id", bot_id)
-               .execute())
-        pay_ids = {r["user_id"] for r in (res.data or [])}
+        # 1. Users from bot_users (start command)
+        res_u = (supabase.table("bot_users")
+                 .select("user_id")
+                 .eq("bot_id", bot_id)
+                 .execute())
+        user_ids = {r["user_id"] for r in (res_u.data or [])}
 
-        # 2. Extra admins
+        # 2. Users from payments (legacy/paid)
+        res_p = (supabase.table("payments")
+                 .select("user_id")
+                 .eq("bot_id", bot_id)
+                 .execute())
+        pay_ids = {r["user_id"] for r in (res_p.data or [])}
+
+        # 3. Extra admins
         raw = get_config("extra_admins", bot_id, "")
         extra_ids = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
 
-        # 3. Primary admin
+        # 4. Primary admin
         primary = _admin_id()
         if primary:
             extra_ids.add(primary)
 
-        total_users = len(pay_ids | extra_ids)
+        # Union of all unique IDs
+        all_ids = user_ids | pay_ids | extra_ids
+        total_users = len(all_ids)
     except Exception:
         total_users = "?"
 
@@ -623,12 +632,21 @@ async def recv_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_id = context.bot_data.get("bot_id", "default")
     text = update.message.text
     try:
-        # 1. Users from payments (all statuses)
-        res = (supabase.table("payments")
-               .select("user_id, username")
-               .eq("bot_id", bot_id)
-               .execute())
-        rows = res.data or []
+        # 1. Users from bot_users (start command)
+        res_u = (supabase.table("bot_users")
+                 .select("user_id, username")
+                 .eq("bot_id", bot_id)
+                 .execute())
+        rows_u = res_u.data or []
+
+        # 2. Users from payments (legacy/paid)
+        res_p = (supabase.table("payments")
+                 .select("user_id, username")
+                 .eq("bot_id", bot_id)
+                 .execute())
+        rows_p = res_p.data or []
+
+        all_rows = rows_u + rows_p
     except Exception as e:
         logger.error(f"broadcast fetch error: {e}")
         await update.message.reply_text("❌ Failed to fetch users. Please try again.")
@@ -636,7 +654,7 @@ async def recv_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Deduplicate by user_id
     seen = {}
-    for r in rows:
+    for r in all_rows:
         seen[r["user_id"]] = r.get("username", str(r["user_id"]))
     
     # Add admins if missing

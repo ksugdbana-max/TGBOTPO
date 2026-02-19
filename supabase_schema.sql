@@ -50,3 +50,17 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE INDEX IF NOT EXISTS idx_payments_bot_id  ON payments (bot_id);
 CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments (user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status  ON payments (status);
+
+-- Bot Users table (Store ALL users who interact with the bot)
+CREATE TABLE IF NOT EXISTS bot_users (
+  bot_id      TEXT NOT NULL DEFAULT 'default',
+  user_id     BIGINT NOT NULL,
+  username    TEXT,
+  first_name  TEXT,
+  is_active   BOOLEAN DEFAULT TRUE,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (bot_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_users_bot  ON bot_users (bot_id);

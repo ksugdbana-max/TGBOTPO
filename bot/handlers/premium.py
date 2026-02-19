@@ -2,7 +2,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import TelegramError, BadRequest
 from telegram.ext import ContextTypes
-from bot.config import get_config
+from bot.config import get_config, supabase
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,20 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    bot_id = context.bot_data.get("bot_id", "default")
+    try:
+        supabase.table("bot_users").upsert({
+            "bot_id": bot_id,
+            "user_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "updated_at": "now()"
+        }, on_conflict="bot_id, user_id").execute()
+    except Exception as e:
+        logger.error(f"[{bot_id}] Failed to save user {user.id}: {e}")
     await send_welcome(update, context)
 
 
