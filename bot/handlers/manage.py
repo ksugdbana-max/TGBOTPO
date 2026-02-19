@@ -291,7 +291,26 @@ async def cb_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─── Section: User List (Approved only) ──────────────────────────────────────
+# ─── Section: User Lists (Menu) ──────────────────────────────────────────────
 async def cb_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    bot_id = context.bot_data.get("bot_id", "default")
+    
+    msg = (f"👥 <b>User Management — {bot_id.upper()}</b>\n\n"
+           "Select a list to view:\n"
+           "• <b>All Users:</b> Everyone who clicked /start or paid.\n"
+           "• <b>Approved Users:</b> Only paid & confirmed members.")
+    
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👥 All Users (Start + Paid)", callback_data="mgr_users_all")],
+        [InlineKeyboardButton("✅ Approved Users Only",      callback_data="mgr_users_approved")],
+        [InlineKeyboardButton("⬅️ Back",                     callback_data="mgr_main")],
+    ])
+    await _edit_or_send(update, msg, kb)
+    return MAIN_MENU
+
+
+async def cb_users_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     bot_id = context.bot_data.get("bot_id", "default")
     try:
@@ -317,13 +336,13 @@ async def cb_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         all_raw = users_u + users_p
             
     except Exception as e:
-        logger.error(f"cb_users error: {e}")
+        logger.error(f"cb_users_all error: {e}")
         all_raw = []
 
     if not all_raw:
         await _edit_or_send(update,
-            "👥 <b>User List</b>\n\n❌ No users found yet.",
-            _back_kb())
+            "👥 <b>All Users</b>\n\n❌ No users found yet.",
+            _users_back_kb())
         return MAIN_MENU
     
     # Deduplicate by user_id, keep latest
@@ -337,17 +356,65 @@ async def cb_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
             seen.add(u["user_id"])
             unique.append(u)
 
-    lines = [f"👥 <b>Latest Users — {bot_id.upper()}</b>\n"]
+    lines = [f"👥 <b>Latest Users (All) — {bot_id.upper()}</b>\n"]
     for i, u in enumerate(unique[:30], 1):
         uname = f"@{u['username']}" if u.get("username") else str(u["user_id"])
         date  = str(u.get("created_at", ""))[:10]
         lines.append(f"{i}. {uname} | {date}")
 
     if len(unique) >= 30:
-        lines.append(f"<i>...and {len(unique)-30} more (showing latest 30)</i>")
+        lines.append(f"<i>...and {len(unique)-30} more</i>")
 
-    await _edit_or_send(update, "\n".join(lines), _back_kb())
+    await _edit_or_send(update, "\n".join(lines), _users_back_kb())
     return MAIN_MENU
+
+
+async def cb_users_approved(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    bot_id = context.bot_data.get("bot_id", "default")
+    try:
+        res = (supabase.table("payments")
+               .select("user_id, username, created_at, payment_type")
+               .eq("bot_id", bot_id)
+               .eq("status", "confirmed")
+               .order("created_at", desc=True)
+               .limit(50)
+               .execute())
+        users = res.data or []
+    except Exception as e:
+        logger.error(f"cb_users_approved error: {e}")
+        users = []
+
+    if not users:
+        await _edit_or_send(update,
+            "✅ <b>Approved Users</b>\n\n❌ No confirmed premium members yet.",
+            _users_back_kb())
+        return MAIN_MENU
+
+    # Deduplicate just in case multiple payments (though payment_id is unique, user_id duplicates possible)
+    seen = set()
+    unique = []
+    for u in users:
+        if u["user_id"] not in seen:
+            seen.add(u["user_id"])
+            unique.append(u)
+
+    lines = [f"✅ <b>Approved Users — {bot_id.upper()}</b>\n"]
+    for i, u in enumerate(unique[:30], 1):
+        uname = f"@{u['username']}" if u.get("username") else str(u["user_id"])
+        ptype = u.get("payment_type", "?").upper()
+        date  = str(u.get("created_at", ""))[:10]
+        lines.append(f"{i}. {uname} | {ptype} | {date}")
+
+    if len(unique) >= 30:
+        lines.append(f"<i>...and {len(unique)-30} more</i>")
+
+    await _edit_or_send(update, "\n".join(lines), _users_back_kb())
+    return MAIN_MENU
+
+
+def _users_back_kb():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Users", callback_data="mgr_users")]])
 
 
 # ─── Section: Payments (Pending) ─────────────────────────────────────────────
@@ -971,6 +1038,8 @@ def build_manage_handler() -> ConversationHandler:
                 CallbackQueryHandler(cb_buttons,           pattern="^mgr_buttons$"),
                 CallbackQueryHandler(cb_payments,          pattern="^mgr_payments$"),
                 CallbackQueryHandler(cb_users,             pattern="^mgr_users$"),
+                CallbackQueryHandler(cb_users_all,         pattern="^mgr_users_all$"),
+                CallbackQueryHandler(cb_users_approved,    pattern="^mgr_users_approved$"),
                 CallbackQueryHandler(cb_stats,             pattern="^mgr_stats$"),
                 CallbackQueryHandler(cb_broadcast,         pattern="^mgr_broadcast$"),
                 CallbackQueryHandler(cb_join_link,        pattern="^mgr_join_link$"),
