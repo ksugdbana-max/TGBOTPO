@@ -165,6 +165,27 @@ async def upload_image(bot_id: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
+# ── Telegram File URL (for payment screenshots) ────────────────────────────────
+
+@app.get("/bots/{bot_id}/file/{file_id}", dependencies=[Depends(verify_token)])
+async def get_telegram_file_url(bot_id: str, file_id: str):
+    """Convert a Telegram file_id to a direct download URL."""
+    token = BOT_TOKENS.get(bot_id, "")
+    if not token:
+        raise HTTPException(status_code=404, detail="Bot not found")
+    async with httpx.AsyncClient(timeout=8) as client:
+        r = await client.get(
+            f"https://api.telegram.org/bot{token}/getFile",
+            params={"file_id": file_id}
+        )
+        data = r.json()
+        if not data.get("ok"):
+            raise HTTPException(status_code=400, detail="Could not fetch file from Telegram")
+        file_path = data["result"]["file_path"]
+        url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+        return {"url": url}
+
+
 
 # ── Payments endpoints ────────────────────────────────────────────────────────
 

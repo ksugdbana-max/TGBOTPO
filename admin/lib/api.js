@@ -59,3 +59,8 @@ export async function uploadImage(botId, file) {
     });
     return res.data.url;
 }
+
+export async function getTelegramFileUrl(botId, fileId) {
+    const res = await api.get(`/bots/${botId}/file/${fileId}`);
+    return res.data.url;
+}

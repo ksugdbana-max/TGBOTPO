@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
+import ImageUpload from '../components/ImageUpload';
 import { getAllConfig, updateConfig } from '../lib/api';
 import { useBot } from '../context/BotContext';
 import toast from 'react-hot-toast';
@@ -40,13 +41,13 @@ export default function CryptoPage() {
                     <div className="card">
                         <div className="card-title">₿ Crypto Wallet QR Code</div>
                         <div className="card-desc">Each bot can have its own crypto wallet QR code.</div>
-                        <div className="form-group" style={{ marginTop: 12 }}>
-                            <label className="form-label">QR Code Image URL</label>
-                            <input type="text" className="form-input" value={qrUrl}
-                                onChange={(e) => setQrUrl(e.target.value)} disabled={loading}
-                                placeholder="https://example.com/crypto-qr.jpg" />
-                        </div>
-                        {qrUrl && <img src={qrUrl} alt="Crypto QR" className="img-preview" style={{ maxWidth: 200 }} onError={(e) => { e.target.style.display = 'none'; }} />}
+                        <ImageUpload
+                            botId={selectedBot.bot_id}
+                            value={qrUrl}
+                            onChange={setQrUrl}
+                            label="Crypto QR Code Image"
+                            disabled={loading}
+                        />
                     </div>
                     <div className="card">
                         <div className="card-title">📝 Crypto Payment Instructions</div>

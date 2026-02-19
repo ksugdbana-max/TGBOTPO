@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { getAllPayments, getBotPayments, updatePayment } from '../lib/api';
+import { getAllPayments, updatePayment, getTelegramFileUrl } from '../lib/api';
 import { useBot } from '../context/BotContext';
 import toast from 'react-hot-toast';
 
 const BOT_COLORS = ['#7c3aed', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444'];
 
 export default function UsersPage() {
-    const { bots, selectedBot } = useBot();
+    const { bots } = useBot();
     const [payments, setPayments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState({});
-    const [selectedScreenshot, setSelectedScreenshot] = useState(null);
+    const [screenshot, setScreenshot] = useState(null); // { url, loading }
     const [botFilter, setBotFilter] = useState('all');
     const [statusFilter, setStatusFilter] = useState('all');
 
@@ -30,6 +30,17 @@ export default function UsersPage() {
             setPayments((p) => p.map((pay) => pay.id === id ? { ...pay, status } : pay));
         } catch { toast.error('Action failed.'); }
         finally { setActionLoading((p) => ({ ...p, [id]: null })); }
+    };
+
+    const viewScreenshot = async (botId, fileId) => {
+        setScreenshot({ url: null, loading: true });
+        try {
+            const url = await getTelegramFileUrl(botId, fileId);
+            setScreenshot({ url, loading: false });
+        } catch {
+            toast.error('Could not load screenshot.');
+            setScreenshot(null);
+        }
     };
 
     const getBotColor = (botId) => {
@@ -62,16 +73,29 @@ export default function UsersPage() {
         <Layout title="All Payments" subtitle="Payments from all bots — filter by bot or status">
 
             {/* Screenshot Modal */}
-            {selectedScreenshot && (
-                <div className="modal-overlay" onClick={() => setSelectedScreenshot(null)}>
+            {screenshot && (
+                <div className="modal-overlay" onClick={() => setScreenshot(null)}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                            <div style={{ fontWeight: 600 }}>Payment Screenshot</div>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedScreenshot(null)}>✕ Close</button>
+                            <div style={{ fontWeight: 600 }}>💸 Payment Screenshot</div>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setScreenshot(null)}>✕ Close</button>
                         </div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 8, background: 'var(--bg-secondary)', borderRadius: 8 }}>
-                            📁 File ID: <code style={{ wordBreak: 'break-all' }}>{selectedScreenshot}</code>
-                        </div>
+                        {screenshot.loading ? (
+                            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                                <span className="spinner" style={{ width: 28, height: 28, display: 'inline-block' }} />
+                                <div style={{ marginTop: 12 }}>Loading screenshot...</div>
+                            </div>
+                        ) : screenshot.url ? (
+                            <img
+                                src={screenshot.url}
+                                alt="Payment screenshot"
+                                style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: 10 }}
+                            />
+                        ) : (
+                            <div style={{ color: 'var(--danger)', textAlign: 'center', padding: 20 }}>
+                                ❌ Failed to load image
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
@@ -105,7 +129,7 @@ export default function UsersPage() {
                                         {(bot.display_name || bot.first_name || 'B')[0].toUpperCase()}
                                     </div>
                                     <div>
-                                        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>{bot.display_name || bot.first_name}</div>
+                                        <div style={{ fontWeight: 600, fontSize: 14 }}>{bot.display_name || bot.first_name}</div>
                                         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>@{bot.username}</div>
                                     </div>
                                     {botFilter === bot.bot_id && <span style={{ marginLeft: 'auto', fontSize: 11, background: `${color}33`, color, padding: '2px 8px', borderRadius: 100, fontWeight: 600 }}>Filtered</span>}
@@ -178,8 +202,14 @@ export default function UsersPage() {
                                 <td><span className={`badge badge-${p.status}`}>{p.status}</span></td>
                                 <td>
                                     {p.screenshot_file_id ? (
-                                        <button className="btn btn-ghost btn-sm" onClick={() => setSelectedScreenshot(p.screenshot_file_id)}>🖼️ View ID</button>
-                                    ) : '—'}
+                                        <button
+                                            className="btn btn-ghost btn-sm"
+                                            onClick={() => viewScreenshot(p.bot_id, p.screenshot_file_id)}
+                                            style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+                                        >
+                                            🖼️ View
+                                        </button>
+                                    ) : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>}
                                 </td>
                                 <td style={{ fontSize: 12 }}>{formatDate(p.created_at)}</td>
                                 <td>

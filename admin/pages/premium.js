@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
+import ImageUpload from '../components/ImageUpload';
 import { getAllConfig, updateConfig } from '../lib/api';
 import { useBot } from '../context/BotContext';
 import toast from 'react-hot-toast';
@@ -40,13 +41,13 @@ export default function PremiumPage() {
                     <div className="card">
                         <div className="card-title">💎 Premium Photo</div>
                         <div className="card-desc">Shown when user taps Get Premium. Make it attractive!</div>
-                        <div className="form-group" style={{ marginTop: 12 }}>
-                            <label className="form-label">Photo URL or Telegram file_id</label>
-                            <input type="text" className="form-input" value={photoUrl}
-                                onChange={(e) => setPhotoUrl(e.target.value)} disabled={loading}
-                                placeholder="https://example.com/premium.jpg" />
-                        </div>
-                        {photoUrl && <img src={photoUrl} alt="Premium preview" className="img-preview" onError={(e) => { e.target.style.display = 'none'; }} />}
+                        <ImageUpload
+                            botId={selectedBot.bot_id}
+                            value={photoUrl}
+                            onChange={setPhotoUrl}
+                            label="Premium Photo"
+                            disabled={loading}
+                        />
                     </div>
                     <div className="card">
                         <div className="card-title">✍️ Premium Caption</div>
