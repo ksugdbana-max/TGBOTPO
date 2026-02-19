@@ -1,6 +1,6 @@
-from telegram import Update, ForceReply
+from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
-from bot.config import get_config, supabase, BOT_ID
+from bot.config import supabase
 import datetime
 
 WAITING_SCREENSHOT_UPI = 1
@@ -8,14 +8,12 @@ WAITING_SCREENSHOT_CRYPTO = 2
 
 
 async def paid_upi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """User tapped I HAVE PAID on UPI."""
     query = update.callback_query
     await query.answer()
     try:
         await query.message.delete()
     except Exception:
         pass
-
     context.user_data["payment_type"] = "upi"
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -26,14 +24,12 @@ async def paid_upi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def paid_crypto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """User tapped I HAVE PAID on Crypto."""
     query = update.callback_query
     await query.answer()
     try:
         await query.message.delete()
     except Exception:
         pass
-
     context.user_data["payment_type"] = "crypto"
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -44,21 +40,20 @@ async def paid_crypto_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive screenshot from user and save to DB."""
     user = update.effective_user
     payment_type = context.user_data.get("payment_type", "upi")
+    # Get the bot_id for this bot instance
+    bot_id = context.bot_data.get("bot_id", "default")
 
     if not update.message.photo:
         await update.message.reply_text("❌ Please send a photo/screenshot of your payment.")
         return WAITING_SCREENSHOT_UPI if payment_type == "upi" else WAITING_SCREENSHOT_CRYPTO
 
-    # Get the highest resolution photo
     file_id = update.message.photo[-1].file_id
 
-    # Save to Supabase
     try:
         supabase.table("payments").insert({
-            "bot_id": BOT_ID,
+            "bot_id": bot_id,
             "user_id": user.id,
             "username": user.username or user.first_name or str(user.id),
             "payment_type": payment_type,
@@ -67,7 +62,7 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "created_at": datetime.datetime.utcnow().isoformat(),
             "updated_at": datetime.datetime.utcnow().isoformat(),
         }).execute()
-    except Exception as e:
+    except Exception:
         await update.message.reply_text("⚠️ Something went wrong. Please try again later.")
         return ConversationHandler.END
 
