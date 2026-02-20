@@ -74,7 +74,7 @@ def build_app(token: str, bot_id: str) -> Application:
 
 async def run_bot(token: str, bot_id: str):
     """Run a single bot with auto-restart on any crash."""
-    RETRY_DELAY = 5
+    RETRY_DELAY = 15  # longer gap so old Render instance dies first
 
     while True:
         app = None
@@ -82,6 +82,14 @@ async def run_bot(token: str, bot_id: str):
             logger.info(f"[{bot_id}] Starting...")
             app = build_app(token, bot_id)
             await app.initialize()
+
+            # ── Delete any stale webhook / previous polling session ──────────
+            try:
+                await app.bot.delete_webhook(drop_pending_updates=True)
+                logger.info(f"[{bot_id}] Webhook cleared.")
+            except Exception as e:
+                logger.warning(f"[{bot_id}] delete_webhook failed (non-fatal): {e}")
+
             await app.start()
             await app.updater.start_polling(
                 drop_pending_updates=True,

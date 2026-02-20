@@ -1,1 +1,1 @@
-web: uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} & python -m bot.main
+web: bash start.sh
