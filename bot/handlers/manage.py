@@ -1025,47 +1025,49 @@ async def cancel_manage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def build_manage_handler() -> ConversationHandler:
     photo_filter = filters.PHOTO | filters.Document.IMAGE
 
+    main_menu_handlers = [
+        # Nav
+        CallbackQueryHandler(cb_main,              pattern="^mgr_main$"),
+        CallbackQueryHandler(cb_welcome,           pattern="^mgr_welcome$"),
+        CallbackQueryHandler(cb_premium,           pattern="^mgr_premium$"),
+        CallbackQueryHandler(cb_upi,               pattern="^mgr_upi$"),
+        CallbackQueryHandler(cb_crypto,            pattern="^mgr_crypto$"),
+        CallbackQueryHandler(cb_buttons,           pattern="^mgr_buttons$"),
+        CallbackQueryHandler(cb_payments,          pattern="^mgr_payments$"),
+        CallbackQueryHandler(cb_users,             pattern="^mgr_users$"),
+        CallbackQueryHandler(cb_users_all,         pattern="^mgr_users_all$"),
+        CallbackQueryHandler(cb_users_approved,    pattern="^mgr_users_approved$"),
+        CallbackQueryHandler(cb_stats,             pattern="^mgr_stats$"),
+        CallbackQueryHandler(cb_broadcast,         pattern="^mgr_broadcast$"),
+        CallbackQueryHandler(cb_join_link,        pattern="^mgr_join_link$"),
+        CallbackQueryHandler(cb_admin_control,     pattern="^mgr_admin_control$"),
+        CallbackQueryHandler(cb_add_admin,         pattern="^mgr_add_admin$"),
+        CallbackQueryHandler(cb_remove_admin,      pattern=r"^mgr_rmadmin_.+$"),
+        # Set prompts
+        CallbackQueryHandler(cb_set_welcome_text,  pattern="^mgr_set_welcome_text$"),
+        CallbackQueryHandler(cb_set_welcome_photo, pattern="^mgr_set_welcome_photo$"),
+        CallbackQueryHandler(cb_set_premium_text,  pattern="^mgr_set_premium_text$"),
+        CallbackQueryHandler(cb_set_premium_photo, pattern="^mgr_set_premium_photo$"),
+        CallbackQueryHandler(cb_set_upi_qr,        pattern="^mgr_set_upi_qr$"),
+        CallbackQueryHandler(cb_set_upi_msg,       pattern="^mgr_set_upi_msg$"),
+        CallbackQueryHandler(cb_set_crypto_qr,     pattern="^mgr_set_crypto_qr$"),
+        CallbackQueryHandler(cb_set_crypto_msg,    pattern="^mgr_set_crypto_msg$"),
+        CallbackQueryHandler(cb_set_demo_url,      pattern="^mgr_set_demo_url$"),
+        CallbackQueryHandler(cb_set_howto_url,     pattern="^mgr_set_howto_url$"),
+        # Delete
+        CallbackQueryHandler(cb_del_welcome_photo, pattern="^mgr_del_welcome_photo$"),
+        CallbackQueryHandler(cb_del_premium_photo, pattern="^mgr_del_premium_photo$"),
+        CallbackQueryHandler(cb_del_upi_qr,        pattern="^mgr_del_upi_qr$"),
+        CallbackQueryHandler(cb_del_crypto_qr,     pattern="^mgr_del_crypto_qr$"),
+        # Payments
+        CallbackQueryHandler(cb_approve, pattern=r"^mgr_approve_.+$"),
+        CallbackQueryHandler(cb_reject,  pattern=r"^mgr_reject_.+$"),
+    ]
+
     return ConversationHandler(
-        entry_points=[CommandHandler("manage", manage_command)],
+        entry_points=[CommandHandler("manage", manage_command)] + main_menu_handlers,
         states={
-            MAIN_MENU: [
-                # Nav
-                CallbackQueryHandler(cb_main,              pattern="^mgr_main$"),
-                CallbackQueryHandler(cb_welcome,           pattern="^mgr_welcome$"),
-                CallbackQueryHandler(cb_premium,           pattern="^mgr_premium$"),
-                CallbackQueryHandler(cb_upi,               pattern="^mgr_upi$"),
-                CallbackQueryHandler(cb_crypto,            pattern="^mgr_crypto$"),
-                CallbackQueryHandler(cb_buttons,           pattern="^mgr_buttons$"),
-                CallbackQueryHandler(cb_payments,          pattern="^mgr_payments$"),
-                CallbackQueryHandler(cb_users,             pattern="^mgr_users$"),
-                CallbackQueryHandler(cb_users_all,         pattern="^mgr_users_all$"),
-                CallbackQueryHandler(cb_users_approved,    pattern="^mgr_users_approved$"),
-                CallbackQueryHandler(cb_stats,             pattern="^mgr_stats$"),
-                CallbackQueryHandler(cb_broadcast,         pattern="^mgr_broadcast$"),
-                CallbackQueryHandler(cb_join_link,        pattern="^mgr_join_link$"),
-                CallbackQueryHandler(cb_admin_control,     pattern="^mgr_admin_control$"),
-                CallbackQueryHandler(cb_add_admin,         pattern="^mgr_add_admin$"),
-                CallbackQueryHandler(cb_remove_admin,      pattern=r"^mgr_rmadmin_.+$"),
-                # Set prompts
-                CallbackQueryHandler(cb_set_welcome_text,  pattern="^mgr_set_welcome_text$"),
-                CallbackQueryHandler(cb_set_welcome_photo, pattern="^mgr_set_welcome_photo$"),
-                CallbackQueryHandler(cb_set_premium_text,  pattern="^mgr_set_premium_text$"),
-                CallbackQueryHandler(cb_set_premium_photo, pattern="^mgr_set_premium_photo$"),
-                CallbackQueryHandler(cb_set_upi_qr,        pattern="^mgr_set_upi_qr$"),
-                CallbackQueryHandler(cb_set_upi_msg,       pattern="^mgr_set_upi_msg$"),
-                CallbackQueryHandler(cb_set_crypto_qr,     pattern="^mgr_set_crypto_qr$"),
-                CallbackQueryHandler(cb_set_crypto_msg,    pattern="^mgr_set_crypto_msg$"),
-                CallbackQueryHandler(cb_set_demo_url,      pattern="^mgr_set_demo_url$"),
-                CallbackQueryHandler(cb_set_howto_url,     pattern="^mgr_set_howto_url$"),
-                # Delete
-                CallbackQueryHandler(cb_del_welcome_photo, pattern="^mgr_del_welcome_photo$"),
-                CallbackQueryHandler(cb_del_premium_photo, pattern="^mgr_del_premium_photo$"),
-                CallbackQueryHandler(cb_del_upi_qr,        pattern="^mgr_del_upi_qr$"),
-                CallbackQueryHandler(cb_del_crypto_qr,     pattern="^mgr_del_crypto_qr$"),
-                # Payments
-                CallbackQueryHandler(cb_approve, pattern=r"^mgr_approve_.+$"),
-                CallbackQueryHandler(cb_reject,  pattern=r"^mgr_reject_.+$"),
-            ],
+            MAIN_MENU: main_menu_handlers,
             AWAIT_WELCOME_TEXT:  [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_welcome_text)],
             AWAIT_WELCOME_PHOTO: [MessageHandler(photo_filter, recv_welcome_photo)],
             AWAIT_PREMIUM_TEXT:  [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_premium_text)],
